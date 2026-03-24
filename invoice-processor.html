@@ -420,7 +420,7 @@ function confidence(data, fields) {
 
 /* ══ STATE ══════════════════════════════════════════ */
 const S = {
-  apiKey:'', fields:[
+  apiKey:localStorage.getItem('anthropic_api_key')||'', fields:[
     {label:'Nom du débiteur', key:'debtor_company_name', type:'text', required:true},
     {label:'Montant TTC',     key:'amount_ttc',          type:'number', required:true},
     {label:'N° de facture',   key:'invoice_number',      type:'text', required:true},
@@ -441,7 +441,13 @@ function handleFiles(list) {
   if (!pdfs.length) return;
   if (firstBatch) {
     document.getElementById('screen-upload').classList.add('out');
-    setTimeout(()=>{document.getElementById('screen-upload').style.display='none';document.getElementById('screen-main').classList.add('in');},280);
+    setTimeout(()=>{
+      document.getElementById('screen-upload').style.display='none';
+      document.getElementById('screen-main').classList.add('in');
+      startExtraction();
+    },280);
+  } else {
+    startExtraction();
   }
   renderSidebar(); updateBar();
   if (S.cur===-1) selectInv(0);
@@ -469,12 +475,11 @@ function selectInv(i) {
   document.getElementById('pdfTitle').textContent=shortName(inv.file.name);
   document.getElementById('pdfTitle').style.color='var(--text)';
   renderPDF(inv.file);
-  const hasParsed = inv.status!=='pending';
-  document.getElementById('emptyState').style.display=hasParsed?'none':'flex';
-  document.getElementById('fieldsContent').style.display=hasParsed?'block':'none';
-  document.getElementById('fieldsFooter').style.display=hasParsed?'':'none';
-  if (hasParsed){renderFieldsUI(inv);renderBadges(inv);}
-  else{document.getElementById('panelBadges').innerHTML='';document.getElementById('footerBadges').innerHTML='';}
+  document.getElementById('emptyState').style.display='none';
+  document.getElementById('fieldsContent').style.display='block';
+  document.getElementById('fieldsFooter').style.display='';
+  renderFieldsUI(inv);
+  renderBadges(inv);
 }
 
 /* ══ PDF PREVIEW ═════════════════════════════════════ */
@@ -572,7 +577,8 @@ async function startExtraction(){
   document.getElementById('ovFill').style.width='100%';
   setTimeout(()=>ov.classList.remove('show'),400);
   S.busy=false;updateBar();
-  if(S.cur===-1){const fi=S.invoices.findIndex(i=>i.status==='extracted');if(fi>=0)selectInv(fi);}
+  if(S.cur>=0) selectInv(S.cur);
+  else{const fi=S.invoices.findIndex(i=>i.status==='extracted');if(fi>=0)selectInv(fi);}
 }
 
 async function doExtract(i){
@@ -700,6 +706,8 @@ function closeModal(){document.getElementById('modalBg').classList.remove('show'
 function maybeCloseModal(e){if(e.target===document.getElementById('modalBg'))closeModal();}
 function saveModal(){
   S.apiKey=document.getElementById('apiKeyInput').value.trim();
+  if(S.apiKey) localStorage.setItem('anthropic_api_key',S.apiKey);
+  else localStorage.removeItem('anthropic_api_key');
   S.nomSep=document.getElementById('nomSep').value;
   closeModal();updateBar();
 }
