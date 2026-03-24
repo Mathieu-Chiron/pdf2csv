@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Traitement de factures</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --bg:#ffffff;--bg2:#f7f7f5;--bg3:#f0efeb;
+  --text:#1a1a1a;--text2:#6b6b6b;--text3:#9b9b9b;
+  --bd:rgba(0,0,0,0.10);--bd2:rgba(0,0,0,0.18);
+  --teal:#1D9E75;--teal-bg:#E1F5EE;--teal-text:#085041;
+  --red:#E24B4A;--red-bg:#FCEBEB;--red-text:#791F1F;
+  --amber:#BA7517;--amber-bg:#FAEEDA;--amber-text:#633806;
+  --r:8px;--rl:12px;--sidebar:220px;--topbar:52px;
+}
+@media(prefers-color-scheme:dark){:root{
+  --bg:#1a1a18;--bg2:#242422;--bg3:#2e2e2b;
+  --text:#f0efeb;--text2:#a0a09c;--text3:#646460;
+  --bd:rgba(255,255,255,0.08);--bd2:rgba(255,255,255,0.16);
+  --teal:#5DCAA5;--teal-bg:#04342C;--teal-text:#9FE1CB;
+  --red:#F09595;--red-bg:#501313;--red-text:#F7C1C1;
+  --amber:#EF9F27;--amber-bg:#412402;--amber-text:#FAC775;
+}}
+html,body{height:100%;overflow:hidden;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;}
+
+/* UPLOAD */
+#screen-upload{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);transition:opacity .25s;}
+#screen-upload.out{opacity:0;pointer-events:none;}
+.dz-title{font-size:22px;font-weight:500;margin-bottom:6px;}
+.dz-sub{font-size:14px;color:var(--text2);margin-bottom:2.5rem;}
+.dropzone{width:min(500px,90vw);border:1.5px dashed var(--bd2);border-radius:var(--rl);padding:3rem 2rem;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;}
+.dropzone:hover,.dropzone.over{border-color:var(--teal);background:var(--teal-bg);}
+.dz-icon{margin:0 auto 1rem;width:38px;height:38px;opacity:.3;}
+.dz-main{font-size:15px;font-weight:500;margin-bottom:4px;}
+.dz-hint{font-size:13px;color:var(--text2);}
+
+/* MAIN */
+#screen-main{position:fixed;inset:0;display:flex;flex-direction:column;opacity:0;pointer-events:none;transition:opacity .25s;}
+#screen-main.in{opacity:1;pointer-events:all;}
+
+/* TOPBAR */
+.topbar{height:var(--topbar);display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-bottom:.5px solid var(--bd);background:var(--bg);flex-shrink:0;gap:12px;}
+.topbar-left{display:flex;align-items:center;gap:14px;}
+.app-name{font-size:14px;font-weight:500;}
+.prog-wrap{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text2);}
+.prog-bar{width:100px;height:3px;background:var(--bg3);border-radius:2px;overflow:hidden;}
+.prog-fill{height:100%;background:var(--teal);transition:width .3s;}
+.topbar-right{display:flex;align-items:center;gap:7px;}
+
+/* LAYOUT */
+.layout{flex:1;display:flex;overflow:hidden;position:relative;}
+
+/* SIDEBAR */
+.sidebar{width:var(--sidebar);flex-shrink:0;border-right:.5px solid var(--bd);background:var(--bg2);display:flex;flex-direction:column;overflow:hidden;}
+.sb-head{padding:12px 14px 6px;font-size:11px;font-weight:500;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;flex-shrink:0;}
+.sb-list{flex:1;overflow-y:auto;padding:0 8px 8px;}
+.sb-list::-webkit-scrollbar{width:3px;}
+.sb-list::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px;}
+.inv-item{display:flex;align-items:center;gap:7px;padding:7px 8px;border-radius:var(--r);cursor:pointer;margin-bottom:2px;transition:background .1s;}
+.inv-item:hover{background:var(--bg3);}
+.inv-item.active{background:var(--bg);box-shadow:0 0 0 .5px var(--bd2);}
+.inv-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.s-pending{background:var(--text3);}
+.s-extracting{background:var(--amber);animation:pulse .8s infinite;}
+.s-extracted{background:var(--text3);}
+.s-validated{background:var(--teal);}
+.s-skipped{background:var(--amber);}
+.s-error{background:var(--red);}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+.inv-name{font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.inv-conf{font-size:11px;color:var(--text3);flex-shrink:0;}
+.sb-footer{padding:10px 10px;border-top:.5px solid var(--bd);flex-shrink:0;}
+.add-btn{display:flex;align-items:center;justify-content:center;gap:5px;width:100%;padding:6px;border:.5px dashed var(--bd2);border-radius:var(--r);font-size:12px;color:var(--text2);cursor:pointer;background:transparent;font-family:inherit;transition:border-color .15s,color .15s;}
+.add-btn:hover{border-color:var(--teal);color:var(--teal);}
+
+/* CONTENT */
+.content{flex:1;display:flex;overflow:hidden;}
+
+/* PDF PANEL */
+.pdf-panel{flex:1;border-right:.5px solid var(--bd);background:var(--bg3);display:flex;flex-direction:column;overflow:hidden;}
+.panel-head{padding:9px 15px;font-size:12px;font-weight:500;color:var(--text2);border-bottom:.5px solid var(--bd);flex-shrink:0;background:var(--bg2);display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.pdf-vp{flex:1;overflow-y:auto;display:flex;align-items:flex-start;justify-content:center;padding:20px 14px;}
+.pdf-vp::-webkit-scrollbar{width:4px;}
+.pdf-vp::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px;}
+.pdf-vp canvas{max-width:100%;border-radius:4px;box-shadow:0 1px 8px rgba(0,0,0,.14);}
+.pdf-placeholder{display:flex;align-items:center;justify-content:center;width:100%;height:100%;color:var(--text3);font-size:13px;}
+
+/* FIELDS PANEL */
+.fields-panel{width:42%;min-width:260px;display:flex;flex-direction:column;overflow:hidden;background:var(--bg);}
+.fields-scroll{flex:1;overflow-y:auto;padding:18px 18px 0;}
+.fields-scroll::-webkit-scrollbar{width:4px;}
+.fields-scroll::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px;}
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;color:var(--text3);font-size:13px;}
+.field-row{margin-bottom:14px;}
+.field-lbl{font-size:11px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px;display:flex;align-items:center;gap:3px;}
+.req{color:var(--red);}
+.field-input{width:100%;padding:8px 10px;font-size:13px;font-family:inherit;border:.5px solid var(--bd2);border-radius:var(--r);background:var(--bg);color:var(--text);outline:none;transition:border-color .15s,box-shadow .15s;}
+.field-input:focus{border-color:var(--teal);box-shadow:0 0 0 2px rgba(29,158,117,.12);}
+.field-input.err{border-color:var(--red);}
+.field-input.normd{border-color:var(--teal);background:var(--teal-bg);}
+.field-err{font-size:11px;color:var(--red);margin-top:3px;}
+.field-hint{font-size:11px;color:var(--teal-text);margin-top:3px;}
+.fields-footer{padding:13px 18px;border-top:.5px solid var(--bd);display:flex;flex-direction:column;gap:8px;flex-shrink:0;}
+.footer-badges{display:flex;gap:5px;flex-wrap:wrap;}
+.footer-actions{display:flex;gap:7px;}
+
+/* BADGES */
+.badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500;}
+.b-ok{background:var(--teal-bg);color:var(--teal-text);}
+.b-warn{background:var(--amber-bg);color:var(--amber-text);}
+.b-err{background:var(--red-bg);color:var(--red-text);}
+.b-gray{background:var(--bg3);color:var(--text2);}
+
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:7px 13px;border-radius:var(--r);border:.5px solid var(--bd2);background:var(--bg);color:var(--text);font-size:13px;font-family:inherit;cursor:pointer;transition:background .12s,opacity .12s;white-space:nowrap;}
+.btn:hover{background:var(--bg2);}
+.btn:active{transform:scale(.98);}
+.btn:disabled{opacity:.35;cursor:not-allowed;}
+.btn-p{background:var(--teal);color:#fff;border-color:var(--teal);font-weight:500;}
+.btn-p:hover{opacity:.88;background:var(--teal);}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--text2);}
+.btn-ghost:hover{background:var(--bg3);color:var(--text);}
+.btn-sm{padding:5px 10px;font-size:12px;}
+
+/* EXTRACT OVERLAY */
+.ov{position:absolute;inset:0;background:rgba(var(--bg),0.92);background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:20;opacity:0;pointer-events:none;transition:opacity .2s;}
+.ov.show{opacity:1;pointer-events:all;}
+.ov-label{font-size:13px;color:var(--text2);}
+.ov-bar{width:220px;height:3px;background:var(--bg3);border-radius:2px;overflow:hidden;}
+.ov-fill{height:100%;background:var(--teal);transition:width .3s;}
+.ov-file{font-size:12px;color:var(--text3);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+/* EXPORT */
+#screen-export{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;opacity:0;pointer-events:none;transition:opacity .2s;overflow-y:auto;z-index:30;}
+#screen-export.show{opacity:1;pointer-events:all;}
+.exp-wrap{max-width:740px;margin:0 auto;padding:2.5rem 2rem 4rem;}
+.exp-title{font-size:22px;font-weight:500;margin-bottom:4px;}
+.exp-sub{font-size:14px;color:var(--text2);margin-bottom:1.75rem;}
+.exp-stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:1.75rem;}
+.exp-stat{background:var(--bg2);border-radius:var(--r);padding:10px 16px;text-align:center;}
+.exp-stat-n{font-size:22px;font-weight:500;}
+.exp-stat-l{font-size:11px;color:var(--text2);margin-top:2px;}
+.exp-table-wrap{overflow-x:auto;border:.5px solid var(--bd);border-radius:var(--rl);margin-bottom:1.75rem;}
+.exp-table{width:100%;border-collapse:collapse;font-size:12px;}
+.exp-table th{padding:8px 11px;font-weight:500;color:var(--text2);text-align:left;border-bottom:.5px solid var(--bd);background:var(--bg2);white-space:nowrap;}
+.exp-table td{padding:8px 11px;border-bottom:.5px solid var(--bd);}
+.exp-table tr:last-child td{border-bottom:none;}
+.exp-actions{display:flex;gap:9px;flex-wrap:wrap;}
+
+/* MODAL */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.32);display:flex;align-items:center;justify-content:center;z-index:50;opacity:0;pointer-events:none;transition:opacity .2s;}
+.modal-bg.show{opacity:1;pointer-events:all;}
+.modal{background:var(--bg);border-radius:var(--rl);border:.5px solid var(--bd2);padding:22px;width:min(470px,92vw);max-height:90vh;overflow-y:auto;}
+.modal-title{font-size:16px;font-weight:500;margin-bottom:3px;}
+.modal-sub{font-size:13px;color:var(--text2);margin-bottom:18px;}
+.msec{margin-bottom:18px;}
+.msec-t{font-size:11px;font-weight:500;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;padding-bottom:6px;border-bottom:.5px solid var(--bd);}
+.form-lbl{font-size:12px;font-weight:500;color:var(--text2);margin-bottom:4px;display:block;}
+.form-inp{width:100%;padding:7px 9px;font-size:13px;font-family:inherit;border:.5px solid var(--bd2);border-radius:var(--r);background:var(--bg);color:var(--text);outline:none;}
+.form-inp:focus{border-color:var(--teal);}
+.fconf-row{display:flex;gap:6px;align-items:center;margin-bottom:7px;}
+.fconf-row input[type=text]{flex:1;padding:5px 8px;font-size:12px;font-family:inherit;border:.5px solid var(--bd2);border-radius:var(--r);background:var(--bg);color:var(--text);outline:none;}
+.fconf-row input[type=text]:focus{border-color:var(--teal);}
+.fconf-row select{width:82px;padding:5px 5px;font-size:12px;font-family:inherit;border:.5px solid var(--bd2);border-radius:var(--r);background:var(--bg);color:var(--text);outline:none;}
+.nom-tokens{display:flex;flex-wrap:wrap;gap:6px;margin:7px 0;}
+.nom-tok{padding:3px 10px;border-radius:20px;border:.5px solid var(--bd2);font-size:12px;cursor:pointer;color:var(--text2);background:var(--bg);user-select:none;transition:all .12s;}
+.nom-tok.on{background:var(--teal-bg);color:var(--teal-text);border-color:var(--teal);}
+.nom-prev{font-family:monospace;font-size:11px;color:var(--teal);background:var(--teal-bg);padding:5px 9px;border-radius:var(--r);margin-top:6px;}
+.key-st{font-size:12px;margin-top:5px;}
+.modal-foot{display:flex;justify-content:flex-end;gap:7px;padding-top:14px;border-top:.5px solid var(--bd);margin-top:2px;}
+.spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;}
+.spin-d{border:2px solid var(--bd2);border-top-color:var(--teal);}
+@keyframes sp{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+
+<!-- ═══ UPLOAD ════════════════════════════════════ -->
+<div id="screen-upload">
+  <div class="dz-title">Traitement de factures</div>
+  <div class="dz-sub">Importez vos PDF pour extraire, vérifier et exporter les données.</div>
+  <div class="dropzone" id="dropzone"
+    onclick="document.getElementById('fi1').click()"
+    ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+    <svg class="dz-icon" viewBox="0 0 40 40" fill="none">
+      <path d="M8 32h24M20 8v16M13 15l7-7 7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div class="dz-main">Uploadez vos factures PDF</div>
+    <div class="dz-hint">Glissez-déposez ou cliquez pour sélectionner</div>
+  </div>
+  <input type="file" id="fi1" multiple accept=".pdf" style="display:none;" onchange="handleFiles(this.files)"/>
+</div>
+
+<!-- ═══ MAIN ══════════════════════════════════════ -->
+<div id="screen-main">
+  <!-- topbar -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <span class="app-name">Factures</span>
+      <div class="prog-wrap" id="progWrap" style="display:none;">
+        <div class="prog-bar"><div class="prog-fill" id="progFill" style="width:0%"></div></div>
+        <span id="progTxt">0 / 0</span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <button class="btn btn-ghost btn-sm" onclick="openModal()">Paramètres</button>
+      <button class="btn btn-sm" id="btnExport" onclick="showExport()" style="display:none;">Exporter</button>
+      <button class="btn btn-p btn-sm" id="btnExtract" onclick="startExtraction()" disabled>Extraire les données</button>
+    </div>
+  </div>
+
+  <div class="layout">
+    <!-- sidebar -->
+    <div class="sidebar">
+      <div class="sb-head">Factures <span id="sbCount" style="font-weight:400;color:var(--text3);"></span></div>
+      <div class="sb-list" id="sbList"></div>
+      <div class="sb-footer">
+        <button class="add-btn" onclick="document.getElementById('fi2').click()">
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          Ajouter des fichiers
+        </button>
+        <input type="file" id="fi2" multiple accept=".pdf" style="display:none;" onchange="handleFiles(this.files)"/>
+      </div>
+    </div>
+
+    <!-- content -->
+    <div class="content">
+      <!-- PDF panel -->
+      <div class="pdf-panel">
+        <div class="panel-head">
+          <span id="pdfTitle" style="color:var(--text3);">Aucune facture sélectionnée</span>
+          <span id="pdfInfo" style="font-size:11px;color:var(--text3);"></span>
+        </div>
+        <div class="pdf-vp" id="pdfVp">
+          <div class="pdf-placeholder">
+            <svg width="36" height="36" viewBox="0 0 36 36" fill="none" style="opacity:.2;"><path d="M8 4h13l7 7v21H8V4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M21 4v7h7" stroke="currentColor" stroke-width="1.2"/></svg>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fields panel -->
+      <div class="fields-panel">
+        <div class="panel-head">
+          <span>Données extraites</span>
+          <div id="panelBadges" style="display:flex;gap:5px;"></div>
+        </div>
+        <div class="fields-scroll" id="fieldsScroll">
+          <div class="empty-state" id="emptyState">
+            <svg width="32" height="32" viewBox="0 0 32 32" fill="none" style="opacity:.2;"><rect x="3" y="6" width="26" height="20" rx="2" stroke="currentColor" stroke-width="1.2"/><path d="M8 12h16M8 17h10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            <span>Sélectionnez une facture</span>
+          </div>
+          <div id="fieldsContent" style="display:none;"></div>
+        </div>
+        <div class="fields-footer" id="fieldsFooter" style="display:none;">
+          <div class="footer-badges" id="footerBadges"></div>
+          <div class="footer-actions">
+            <button class="btn btn-ghost btn-sm" onclick="skipInvoice()">Ignorer</button>
+            <button class="btn btn-ghost btn-sm" onclick="reExtract()">Ré-extraire</button>
+            <button class="btn btn-p btn-sm" style="flex:1;" onclick="validateInvoice()">Valider ✓</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- extraction overlay -->
+    <div class="ov" id="ov">
+      <div class="ov-label">Extraction en cours…</div>
+      <div class="ov-bar"><div class="ov-fill" id="ovFill" style="width:0%"></div></div>
+      <div class="ov-file" id="ovFile"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ EXPORT ════════════════════════════════════ -->
+<div id="screen-export">
+  <div class="exp-wrap">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:1.5rem;">
+      <div><div class="exp-title">Export</div><div class="exp-sub">Résumé des factures traitées.</div></div>
+      <button class="btn btn-ghost btn-sm" onclick="hideExport()">← Retour</button>
+    </div>
+    <div class="exp-stats" id="expStats"></div>
+    <div class="exp-table-wrap"><table class="exp-table" id="expTable"><thead></thead><tbody></tbody></table></div>
+    <div class="exp-actions">
+      <button class="btn btn-p" onclick="exportCSV()">Télécharger CSV</button>
+      <button class="btn btn-p" onclick="exportZIP()">Télécharger ZIP</button>
+      <button class="btn" onclick="restart()">Nouvelle session</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL ═════════════════════════════════════ -->
+<div class="modal-bg" id="modalBg" onclick="maybeCloseModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title">Paramètres</div>
+    <div class="modal-sub">Clé API, champs à extraire, nomenclature des fichiers.</div>
+
+    <div class="msec">
+      <div class="msec-t">Clé API Anthropic</div>
+      <label class="form-lbl">Clé (sk-ant-…)</label>
+      <div style="display:flex;gap:7px;">
+        <input type="password" class="form-inp" id="apiKeyInput" placeholder="sk-ant-api03-…" style="flex:1;"/>
+        <button class="btn btn-sm" onclick="testKey()">Tester</button>
+      </div>
+      <div class="key-st" id="keySt"></div>
+    </div>
+
+    <div class="msec">
+      <div class="msec-t">Champs à extraire</div>
+      <div id="fconfList"></div>
+      <button class="btn btn-sm" onclick="addField()" style="margin-top:4px;">+ Ajouter un champ</button>
+    </div>
+
+    <div class="msec">
+      <div class="msec-t">Nomenclature des fichiers PDF</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:7px;">Cliquez sur les tokens à inclure dans le nom du fichier.</p>
+      <div class="nom-tokens" id="nomToks"></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+        <span style="font-size:12px;color:var(--text2);">Séparateur :</span>
+        <select class="form-inp" id="nomSep" style="width:64px;padding:4px 6px;" onchange="renderNomPrev()">
+          <option value="_">_</option><option value="-">-</option><option value=".">.</option>
+        </select>
+        <button class="btn btn-sm" onclick="S.nomenclature=[];renderNomToks();">Reset</button>
+      </div>
+      <div class="nom-prev" id="nomPrev">aperçu : —</div>
+    </div>
+
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-p" onclick="saveModal()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ══ NORMALISATION v3 ══════════════════════════════ */
+const API = 'https://api.anthropic.com/v1/messages';
+
+function normalizeDate(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [,m,d]=s.split('-').map(Number);
+    return (m<1||m>12||d<1||d>31)?null:s;
+  }
+  const dmy=s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+  if (dmy) {
+    const [,dd,mm,yyyy]=dmy;
+    if (parseInt(mm)>12||parseInt(dd)>31) return null;
+    return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+  }
+  const MO={jan:1,fév:2,fev:2,feb:2,mar:3,avr:4,apr:4,mai:5,may:5,jun:6,jui:6,jul:7,aoû:8,aou:8,aug:8,sep:9,oct:10,nov:11,déc:12,dec:12,january:1,february:2,march:3,april:4,june:6,july:7,august:8,september:9,october:10,november:11,december:12};
+  const t1=s.match(/^(\d{1,2})\s+([a-zéûôèA-Z]+)\.?\s+(\d{4})$/i);
+  if (t1){const k=t1[2].toLowerCase();const m=MO[k]||MO[k.slice(0,3)];if(m) return `${t1[3]}-${String(m).padStart(2,'0')}-${t1[1].padStart(2,'0')}`;}
+  const t2=s.match(/^([a-zA-Z]+)\s+(\d{1,2}),?\s+(\d{4})$/i);
+  if (t2){const k=t2[1].toLowerCase();const m=MO[k]||MO[k.slice(0,3)];if(m) return `${t2[3]}-${String(m).padStart(2,'0')}-${t2[2].padStart(2,'0')}`;}
+  const ts=s.match(/^(\d{4}-\d{2}-\d{2})T/);
+  if (ts) return ts[1];
+  return null;
+}
+
+function normalizeAmount(raw) {
+  if (raw==null||raw==='') return null;
+  let s=String(raw).trim();
+  s=s.replace(/\b(EUR|USD|GBP|CHF|JPY)\b/gi,'').replace(/[€$£¥]/g,'').replace(/\s*[eE]\s*$/,'').trim();
+  s=s.replace(/(\d)[\s\u00A0](\d)/g,'$1$2').replace(/(\d)[\s\u00A0](\d)/g,'$1$2').trim();
+  if (!s) return null;
+  const D=(s.match(/\./g)||[]).length, C=(s.match(/,/g)||[]).length;
+  const pf=v=>{ const n=parseFloat(v); return isNaN(n)?null:n; };
+  if(!D&&!C) return pf(s);
+  if(!D&&C===1) return pf(s.replace(',','.'));
+  if(!C&&D===1) return pf(s);
+  if(!C&&D>1) return pf(s.replace(/\./g,''));
+  if(D>1&&C===1) return pf(s.replace(/\./g,'').replace(',','.'));
+  if(C>1&&D===1) return pf(s.replace(/,/g,''));
+  if(D===1&&C===1){ return s.lastIndexOf(',')>s.lastIndexOf('.') ? pf(s.replace('.','').replace(',','.')) : pf(s.replace(',','')); }
+  return pf(s.replace(',','.'));
+}
+
+function parseJSON(raw) {
+  if (!raw||typeof raw!=='string') return {ok:false,data:{},err:'Réponse vide'};
+  let t=raw.trim().replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```$/,'');
+  const m=t.match(/\{[\s\S]*\}/);
+  if (!m) return {ok:false,data:{},err:'Aucun JSON trouvé'};
+  try { return {ok:true,data:JSON.parse(m[0])}; }
+  catch(e) {
+    try { return {ok:true,data:JSON.parse(m[0].replace(/,\s*([}\]])/g,'$1')),repaired:true}; }
+    catch(e2) { return {ok:false,data:{},err:'JSON invalide'}; }
+  }
+}
+
+function vandn(value, f, ctx) {
+  const errs=[], empty=value==null||String(value).trim()==='';
+  if (f.required&&empty) return {valid:false,norm:value,errs:['Champ requis']};
+  if (empty) return {valid:true,norm:value,errs:[]};
+  let norm=value;
+  if (f.type==='date') {
+    norm=normalizeDate(value);
+    if (!norm) errs.push(`Date non reconnue : "${value}"`);
+    else { const d=new Date(norm); if(isNaN(d.getTime())) errs.push('Date invalide'); if(d.getFullYear()<2000||d.getFullYear()>2099) errs.push('Année hors plage'); }
+  }
+  if (f.type==='number') {
+    norm=normalizeAmount(value);
+    if (norm==null) errs.push(`Montant non reconnu : "${value}"`);
+    else { if(ctx!=='line'&&norm<0) errs.push('Montant négatif'); if(norm>10_000_000) errs.push('Montant > 10M€'); }
+  }
+  if (f.type==='text'&&String(value).length>500) errs.push('Valeur trop longue');
+  return {valid:errs.length===0,norm:norm??value,errs};
+}
+
+function confidence(data, fields) {
+  let sc=0,mx=0;
+  fields.forEach(f=>{mx+=2;const v=data[f.key];if(v!=null&&String(v).trim()!==''){sc+=1;if(vandn(v,f).valid)sc+=1;}});
+  return mx===0?0:Math.round(sc/mx*100);
+}
+
+/* ══ STATE ══════════════════════════════════════════ */
+const S = {
+  apiKey:'', fields:[
+    {label:'Nom du débiteur', key:'debtor_company_name', type:'text', required:true},
+    {label:'Montant TTC',     key:'amount_ttc',          type:'number', required:true},
+    {label:'N° de facture',   key:'invoice_number',      type:'text', required:true},
+  ],
+  nomenclature:['debtor_company_name','invoice_number'], nomSep:'_',
+  files:[], invoices:[], cur:-1, busy:false,
+};
+
+/* ══ UPLOAD ══════════════════════════════════════════ */
+function onDragOver(e){e.preventDefault();document.getElementById('dropzone').classList.add('over');}
+function onDragLeave(){document.getElementById('dropzone').classList.remove('over');}
+function onDrop(e){e.preventDefault();document.getElementById('dropzone').classList.remove('over');handleFiles(e.dataTransfer.files);}
+
+function handleFiles(list) {
+  const pdfs=Array.from(list).filter(f=>f.type==='application/pdf'||f.name.endsWith('.pdf'));
+  const firstBatch = S.invoices.length===0 && pdfs.length>0;
+  pdfs.forEach(f=>{ if(!S.files.find(x=>x.name===f.name)){S.files.push(f);S.invoices.push({file:f,status:'pending',data:{},errors:{},confidence:null,rawNorm:{}});}});
+  if (!pdfs.length) return;
+  if (firstBatch) {
+    document.getElementById('screen-upload').classList.add('out');
+    setTimeout(()=>{document.getElementById('screen-upload').style.display='none';document.getElementById('screen-main').classList.add('in');},280);
+  }
+  renderSidebar(); updateBar();
+  if (S.cur===-1) selectInv(0);
+}
+
+/* ══ SIDEBAR ═════════════════════════════════════════ */
+function renderSidebar() {
+  const l=document.getElementById('sbList');l.innerHTML='';
+  document.getElementById('sbCount').textContent=`(${S.invoices.length})`;
+  S.invoices.forEach((inv,i)=>{
+    const el=document.createElement('div');
+    el.className='inv-item'+(i===S.cur?' active':'');
+    const conf=inv.confidence!==null?`<span class="inv-conf">${inv.confidence}%</span>`:'';
+    el.innerHTML=`<div class="inv-dot s-${inv.status}"></div><span class="inv-name" title="${esc(inv.file.name)}">${esc(shortName(inv.file.name))}</span>${conf}`;
+    el.onclick=()=>selectInv(i);
+    l.appendChild(el);
+  });
+}
+function shortName(n){return n.replace(/\.pdf$/i,'');}
+
+/* ══ SELECT INVOICE ══════════════════════════════════ */
+function selectInv(i) {
+  S.cur=i; renderSidebar();
+  const inv=S.invoices[i]; if(!inv) return;
+  document.getElementById('pdfTitle').textContent=shortName(inv.file.name);
+  document.getElementById('pdfTitle').style.color='var(--text)';
+  renderPDF(inv.file);
+  const hasParsed = inv.status!=='pending';
+  document.getElementById('emptyState').style.display=hasParsed?'none':'flex';
+  document.getElementById('fieldsContent').style.display=hasParsed?'block':'none';
+  document.getElementById('fieldsFooter').style.display=hasParsed?'':'none';
+  if (hasParsed){renderFieldsUI(inv);renderBadges(inv);}
+  else{document.getElementById('panelBadges').innerHTML='';document.getElementById('footerBadges').innerHTML='';}
+}
+
+/* ══ PDF PREVIEW ═════════════════════════════════════ */
+async function renderPDF(file) {
+  const vp=document.getElementById('pdfVp');
+  vp.innerHTML='<div class="pdf-placeholder"><div class="spin spin-d"></div></div>';
+  try {
+    const buf=await file.arrayBuffer();
+    const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+    document.getElementById('pdfInfo').textContent=`${pdf.numPages} page${pdf.numPages>1?'s':''}`;
+    const page=await pdf.getPage(1);
+    const vport=page.getViewport({scale:1});
+    const w=vp.clientWidth-28;
+    const scale=Math.min(w/vport.width,2.2);
+    const sv=page.getViewport({scale});
+    const cv=document.createElement('canvas');
+    cv.width=sv.width;cv.height=sv.height;
+    await page.render({canvasContext:cv.getContext('2d'),viewport:sv}).promise;
+    vp.innerHTML='';vp.appendChild(cv);
+  } catch(e){vp.innerHTML='<div class="pdf-placeholder">Aperçu indisponible</div>';}
+}
+
+/* ══ FIELDS UI ════════════════════════════════════════ */
+function renderFieldsUI(inv) {
+  const c=document.getElementById('fieldsContent');c.innerHTML='';
+  S.fields.forEach(f=>{
+    const raw=inv.data[f.key],val=raw!=null?String(raw):'';
+    const err=inv.errors?.[f.key],wasNorm=inv.rawNorm?.[f.key]===true;
+    const row=document.createElement('div');row.className='field-row';
+    row.innerHTML=`
+      <div class="field-lbl">${esc(f.label)}${f.required?'<span class="req">*</span>':''}</div>
+      <input class="field-input${err?' err':wasNorm?' normd':''}"
+        type="${f.type==='number'?'number':f.type==='date'?'date':'text'}"
+        id="fi_${f.key}" value="${esc(val)}"
+        placeholder="${f.required?'Requis':'Optionnel'}"
+        oninput="onFI('${f.key}',this.value)"
+      />
+      ${err?`<div class="field-err">${esc(err)}</div>`:''}
+      ${wasNorm&&!err?'<div class="field-hint">Normalisée automatiquement</div>':''}
+    `;
+    c.appendChild(row);
+  });
+}
+
+function onFI(key,val){
+  if(S.cur===-1) return;
+  S.invoices[S.cur].data[key]=val;
+  if(S.invoices[S.cur].errors) delete S.invoices[S.cur].errors[key];
+}
+
+function renderBadges(inv) {
+  const mkBadges=()=>{
+    const b=[];
+    if(inv.status==='validated') b.push('<span class="badge b-ok">Validée</span>');
+    else if(inv.status==='skipped') b.push('<span class="badge b-warn">Ignorée</span>');
+    else if(inv.status==='error') b.push('<span class="badge b-err">Erreur</span>');
+    if(inv.confidence!==null){const c=inv.confidence;b.push(`<span class="badge ${c>=80?'b-ok':c>=50?'b-warn':'b-err'}">Confiance ${c}%</span>`);}
+    if(inv.repaired) b.push('<span class="badge b-warn">JSON réparé</span>');
+    return b.join('');
+  };
+  const h=mkBadges();
+  document.getElementById('footerBadges').innerHTML=h;
+  document.getElementById('panelBadges').innerHTML=h;
+}
+
+/* ══ EXTRACTION ══════════════════════════════════════ */
+function updateBar(){
+  const done=S.invoices.filter(i=>i.status==='validated'||i.status==='skipped').length;
+  const total=S.invoices.length;
+  const pending=S.invoices.filter(i=>i.status==='pending').length;
+  document.getElementById('btnExtract').disabled=pending===0||!S.apiKey||S.busy;
+  document.getElementById('btnExport').style.display=done>0?'':'none';
+  if(total>0){
+    document.getElementById('progWrap').style.display='flex';
+    document.getElementById('progFill').style.width=Math.round(done/total*100)+'%';
+    document.getElementById('progTxt').textContent=`${done} / ${total}`;
+  }
+}
+
+async function startExtraction(){
+  if(!S.apiKey){openModal();return;}
+  const toEx=S.invoices.filter(i=>i.status==='pending');
+  if(!toEx.length) return;
+  S.busy=true;updateBar();
+  const ov=document.getElementById('ov');ov.classList.add('show');
+  for(let idx=0;idx<toEx.length;idx++){
+    const inv=toEx[idx],gi=S.invoices.indexOf(inv);
+    inv.status='extracting';renderSidebar();
+    document.getElementById('ovFill').style.width=Math.round(idx/toEx.length*100)+'%';
+    document.getElementById('ovFile').textContent=inv.file.name;
+    await doExtract(gi);
+    renderSidebar();updateBar();
+    if(S.cur===gi) selectInv(gi);
+  }
+  document.getElementById('ovFill').style.width='100%';
+  setTimeout(()=>ov.classList.remove('show'),400);
+  S.busy=false;updateBar();
+  if(S.cur===-1){const fi=S.invoices.findIndex(i=>i.status==='extracted');if(fi>=0)selectInv(fi);}
+}
+
+async function doExtract(i){
+  const inv=S.invoices[i];
+  try {
+    const b64=await toB64(inv.file);
+    const fd=S.fields.map(f=>`- "${f.label}" → clé JSON: "${f.key}" (type: ${f.type})`).join('\n');
+    const prompt=`Tu es un assistant d'extraction de données de factures. Analyse ce PDF et extrait les champs suivants. Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, sans backticks.
+
+Champs :
+${fd}
+
+Règles :
+- Le débiteur/client est l'entité QUI DOIT PAYER (pas l'émetteur).
+- Montant TTC ; si franchise TVA (art.293B), utilise le HT comme montant final.
+- Dates : format ISO YYYY-MM-DD.
+- Montants : nombre décimal sans symbole ni séparateur de milliers.
+- Champ introuvable → null (JSON, pas la chaîne "null").
+- Ignore tout artefact textuel "null" dans le document.
+
+JSON uniquement.`;
+
+    const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json','x-api-key':S.apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:[{type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}},{type:'text',text:prompt}]}]})});
+    if(!r.ok){const e=await r.json();throw new Error(e.error?.message||r.statusText);}
+    const res=await r.json();
+    const txt=res.content.map(c=>c.text||'').join('');
+    const parsed=parseJSON(txt);
+    if(!parsed.ok) throw new Error(parsed.err);
+    const norm={},rawNorm={};
+    S.fields.forEach(f=>{
+      let v=parsed.data[f.key];
+      if(v==='null'||v==='NULL'||v==='Null') v=null;
+      if(v!=null&&String(v).trim()!==''){
+        const res2=vandn(v,f);
+        const nv=res2.norm!=null?res2.norm:v;
+        norm[f.key]=nv; rawNorm[f.key]=String(nv)!==String(v);
+      } else { norm[f.key]=null; rawNorm[f.key]=false; }
+    });
+    inv.data=norm;inv.rawNorm=rawNorm;inv.repaired=parsed.repaired||false;
+    inv.confidence=confidence(norm,S.fields);inv.status='extracted';inv.errors={};
+  } catch(e){inv.status='error';inv.error=e.message;inv.data={};inv.confidence=0;}
+}
+
+/* ══ VALIDATE / SKIP / RE-EXTRACT ════════════════════ */
+function validateInvoice(){
+  if(S.cur===-1) return;
+  const inv=S.invoices[S.cur];inv.errors={};let ok=true;
+  S.fields.forEach(f=>{
+    const v=inv.data[f.key],res=vandn(v,f);
+    if(!res.valid){inv.errors[f.key]=res.errs[0];ok=false;}
+    else if(res.norm!==v&&res.norm!=null) inv.data[f.key]=res.norm;
+  });
+  if(!ok){selectInv(S.cur);return;}
+  inv.status='validated';renderSidebar();renderBadges(inv);updateBar();
+  const next=S.invoices.findIndex((x,i)=>i>S.cur&&(x.status==='extracted'||x.status==='error'));
+  if(next>=0) setTimeout(()=>selectInv(next),140);
+}
+
+function skipInvoice(){
+  if(S.cur===-1) return;
+  S.invoices[S.cur].status='skipped';renderSidebar();updateBar();
+  const next=S.invoices.findIndex((x,i)=>i>S.cur&&(x.status==='extracted'||x.status==='error'));
+  if(next>=0) selectInv(next);
+}
+
+async function reExtract(){
+  if(S.cur===-1||!S.apiKey) return;
+  const inv=S.invoices[S.cur];
+  inv.status='pending';inv.data={};inv.errors={};inv.confidence=null;
+  selectInv(S.cur);
+  const ov=document.getElementById('ov');ov.classList.add('show');
+  document.getElementById('ovFile').textContent=inv.file.name;
+  document.getElementById('ovFill').style.width='40%';
+  await doExtract(S.cur);
+  ov.classList.remove('show');
+  selectInv(S.cur);renderSidebar();updateBar();
+}
+
+/* ══ EXPORT ═════════════════════════════════════════ */
+function showExport(){
+  const val=S.invoices.filter(i=>i.status==='validated');
+  const skip=S.invoices.filter(i=>i.status==='skipped');
+  document.getElementById('expStats').innerHTML=`
+    <div class="exp-stat"><div class="exp-stat-n">${S.invoices.length}</div><div class="exp-stat-l">Total</div></div>
+    <div class="exp-stat"><div class="exp-stat-n" style="color:var(--teal-text);">${val.length}</div><div class="exp-stat-l">Validées</div></div>
+    <div class="exp-stat"><div class="exp-stat-n" style="color:var(--amber-text);">${skip.length}</div><div class="exp-stat-l">Ignorées</div></div>`;
+  const thead=document.querySelector('#expTable thead'),tbody=document.querySelector('#expTable tbody');
+  thead.innerHTML='<tr>'+['Fichier',...S.fields.map(f=>f.label),'Statut'].map(h=>`<th>${esc(h)}</th>`).join('')+'</tr>';
+  tbody.innerHTML='';
+  S.invoices.forEach(inv=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(inv.file.name)}</td>`
+      +S.fields.map(f=>`<td>${esc(String(inv.data[f.key]??'—'))}</td>`).join('')
+      +`<td><span class="badge ${inv.status==='validated'?'b-ok':'b-warn'}">${inv.status==='validated'?'Validée':'Ignorée'}</span></td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('screen-export').classList.add('show');
+}
+function hideExport(){document.getElementById('screen-export').classList.remove('show');}
+
+function buildCSV(){
+  const h=['fichier_original','fichier_renomme',...S.fields.map(f=>f.key)];
+  const rows=S.invoices.filter(i=>i.status==='validated').map(inv=>[inv.file.name,mkFname(inv),...S.fields.map(f=>'"'+String(inv.data[f.key]??'').replace(/"/g,'""')+'"')].join(','));
+  return [h.join(','),...rows].join('\n');
+}
+function exportCSV(){dlBlob(new Blob(['\uFEFF'+buildCSV()],{type:'text/csv;charset=utf-8;'}),'factures.csv');}
+async function exportZIP(){
+  const z=new JSZip();z.file('factures.csv','\uFEFF'+buildCSV());
+  for(const inv of S.invoices.filter(i=>i.status==='validated')) z.file(mkFname(inv),await inv.file.arrayBuffer());
+  dlBlob(await z.generateAsync({type:'blob'}),'factures_export.zip');
+}
+function mkFname(inv){if(!S.nomenclature.length)return inv.file.name;return S.nomenclature.map(k=>{const v=inv.data[k];return v?snName(String(v)):'inconnu';}).join(S.nomSep)+'.pdf';}
+function snName(s){return s.replace(/[\/\\:*?"<>|]/g,'').replace(/\s+/g,'_').slice(0,80);}
+function dlBlob(b,n){const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=n;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+function restart(){S.files=[];S.invoices=[];S.cur=-1;S.busy=false;hideExport();document.getElementById('screen-main').classList.remove('in');document.getElementById('screen-upload').style.display='';setTimeout(()=>document.getElementById('screen-upload').classList.remove('out'),10);}
+
+/* ══ MODAL ═══════════════════════════════════════════ */
+function openModal(){
+  document.getElementById('apiKeyInput').value=S.apiKey;
+  document.getElementById('nomSep').value=S.nomSep;
+  renderFconf();renderNomToks();
+  document.getElementById('modalBg').classList.add('show');
+}
+function closeModal(){document.getElementById('modalBg').classList.remove('show');}
+function maybeCloseModal(e){if(e.target===document.getElementById('modalBg'))closeModal();}
+function saveModal(){
+  S.apiKey=document.getElementById('apiKeyInput').value.trim();
+  S.nomSep=document.getElementById('nomSep').value;
+  closeModal();updateBar();
+}
+async function testKey(){
+  const k=document.getElementById('apiKeyInput').value.trim();if(!k)return;
+  const el=document.getElementById('keySt');el.textContent='Test…';
+  try{const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json','x-api-key':k,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:10,messages:[{role:'user',content:'ok'}]})});el.innerHTML=r.ok?'<span style="color:var(--teal);">Clé valide ✓</span>':'<span style="color:var(--red);">Clé invalide</span>';}
+  catch(e){el.innerHTML='<span style="color:var(--red);">Erreur réseau</span>';}
+}
+function renderFconf(){
+  const c=document.getElementById('fconfList');c.innerHTML='';
+  S.fields.forEach((f,i)=>{
+    const row=document.createElement('div');row.className='fconf-row';
+    row.innerHTML=`
+      <input type="text" value="${esc(f.label)}" placeholder="Label" oninput="S.fields[${i}].label=this.value;renderNomToks();">
+      <input type="text" value="${esc(f.key)}" placeholder="clé_csv" style="font-family:monospace;" oninput="S.fields[${i}].key=this.value;renderNomToks();">
+      <select onchange="S.fields[${i}].type=this.value;">
+        <option value="text" ${f.type==='text'?'selected':''}>Texte</option>
+        <option value="number" ${f.type==='number'?'selected':''}>Nombre</option>
+        <option value="date" ${f.type==='date'?'selected':''}>Date</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:3px;font-size:11px;color:var(--text2);cursor:pointer;white-space:nowrap;">
+        <input type="checkbox" ${f.required?'checked':''} onchange="S.fields[${i}].required=this.checked;"> Req.
+      </label>
+      ${i>0?`<button class="btn btn-sm" style="padding:3px 7px;color:var(--red);" onclick="rmField(${i})">✕</button>`:'<div style="width:32px;"></div>'}
+    `;
+    c.appendChild(row);
+  });
+}
+function addField(){S.fields.push({label:'',key:'',type:'text',required:false});renderFconf();renderNomToks();}
+function rmField(i){S.nomenclature=S.nomenclature.filter(k=>k!==S.fields[i].key);S.fields.splice(i,1);renderFconf();renderNomToks();}
+function renderNomToks(){
+  const c=document.getElementById('nomToks');c.innerHTML='';
+  S.fields.forEach(f=>{
+    if(!f.key) return;
+    const el=document.createElement('div');el.className='nom-tok'+(S.nomenclature.includes(f.key)?' on':'');
+    el.textContent=f.key;
+    el.onclick=()=>{S.nomenclature.includes(f.key)?S.nomenclature=S.nomenclature.filter(k=>k!==f.key):S.nomenclature.push(f.key);renderNomToks();};
+    c.appendChild(el);
+  });
+  renderNomPrev();
+}
+function renderNomPrev(){
+  const sep=document.getElementById('nomSep').value;
+  const parts=S.nomenclature.map(k=>{const f=S.fields.find(x=>x.key===k);return f?`[${f.label||k}]`:`[${k}]`;});
+  document.getElementById('nomPrev').textContent=parts.length?'Aperçu : '+parts.join(sep)+'.pdf':'Aperçu : (nom original conservé)';
+}
+
+/* ══ UTILS ═══════════════════════════════════════════ */
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function toB64(f){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=()=>rej(new Error('Lecture échouée'));r.readAsDataURL(f);});}
+if(typeof pdfjsLib!=='undefined') pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+</script>
+</body>
+</html>
