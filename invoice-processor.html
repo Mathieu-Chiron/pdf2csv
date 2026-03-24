@@ -436,9 +436,17 @@ function confidence(data, fields) {
 /* ══ STATE ══════════════════════════════════════════ */
 const S = {
   apiKey:localStorage.getItem('anthropic_api_key')||'', fields:[
-    {label:'Nom du débiteur', key:'debtor_company_name', type:'text', required:true},
-    {label:'Montant TTC',     key:'amount_ttc',          type:'number', required:true},
-    {label:'N° de facture',   key:'invoice_number',      type:'text', required:true},
+    {label:'Nom du débiteur',    key:'debtor_company_name',          type:'text',   required:true},
+    {label:'Adresse',            key:'debtor_post_street_1',         type:'text',   required:true},
+    {label:'Code postal',        key:'debtor_post_postalcode',       type:'text',   required:true},
+    {label:'Ville',              key:'debtor_post_city',             type:'text',   required:true},
+    {label:'Pays',               key:'debtor_post_country_code',     type:'text',   required:true},
+    {label:'N° de facture',      key:'invoice_number',               type:'text',   required:true},
+    {label:'Date émission',      key:'invoice_date',                 type:'date',   required:true},
+    {label:'Échéance',           key:'invoice_due_date',             type:'date',   required:true},
+    {label:'Montant TTC',        key:'amount_ttc',                   type:'number', required:true},
+    {label:'Montant total',      key:'invoice_total_amount_inc_vat', type:'number', required:true},
+    {label:'Montant en suspens', key:'invoice_open_amount_inc_vat',  type:'number', required:true},
   ],
   nomenclature:['debtor_company_name','invoice_number'], nomSep:'_',
   files:[], invoices:[], cur:-1, busy:false,
