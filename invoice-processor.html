@@ -150,6 +150,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .ov-fill{height:100%;background:var(--teal);transition:width .3s;}
 .ov-file{font-size:12px;color:var(--text3);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
+/* COUNTRY AUTOCOMPLETE */
+.country-wrap{position:relative;}
+.country-drop{position:absolute;top:calc(100% + 2px);left:0;right:0;background:var(--bg);border:.5px solid var(--bd2);border-radius:var(--r);box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:100;max-height:180px;overflow-y:auto;display:none;}
+.country-drop.open{display:block;}
+.country-opt{padding:7px 10px;font-size:13px;cursor:pointer;color:var(--text);}
+.country-opt:hover,.country-opt.active{background:var(--teal-bg);color:var(--teal-text);}
+
 /* EXPORT */
 #screen-export{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;opacity:0;pointer-events:none;transition:opacity .2s;overflow-y:auto;z-index:30;}
 #screen-export.show{opacity:1;pointer-events:all;}
@@ -572,15 +579,27 @@ function renderFieldsUI(inv) {
     const raw=inv.data[f.key],val=raw!=null?String(raw):'';
     const err=inv.errors?.[f.key],wasNorm=inv.rawNorm?.[f.key]===true;
     const isEmpty=inv.status!=='pending'&&(raw==null||String(raw).trim()==='');
+    const isCountry=f.key==='debtor_post_country_code';
+    const displayVal=isCountry&&val===''&&inv.status!=='pending'?'France':val;
+    if(isCountry&&displayVal==='France'&&!inv.data[f.key]) inv.data[f.key]='France';
     const row=document.createElement('div');row.className='field-row';
+    const inputClass=`field-input${err?' empty':isEmpty?' empty':wasNorm?' normd':''}`;
     row.innerHTML=`
       <div class="field-lbl">${esc(f.label)}${f.required?'<span class="req">*</span>':''}</div>
-      <input class="field-input${err?' empty':isEmpty?' empty':wasNorm?' normd':''}"
+      ${isCountry?`<div class="country-wrap">
+        <input class="${inputClass}" type="text" id="fi_${f.key}" value="${esc(displayVal)}"
+          placeholder="France" autocomplete="off"
+          oninput="onCountryInput(this);onFI('${f.key}',this.value)"
+          onfocus="onCountryInput(this)"
+          onblur="setTimeout(closeCountryDrop,150)"
+        />
+        <div class="country-drop" id="countryDrop"></div>
+      </div>`:`<input class="${inputClass}"
         type="${f.type==='number'?'number':f.type==='date'?'date':'text'}"
         id="fi_${f.key}" value="${esc(val)}"
         placeholder="${f.required?'Requis':'Optionnel'}"
         oninput="onFI('${f.key}',this.value)"
-      />
+      />`}
       ${err?`<div class="field-err" style="color:var(--amber-text);">${esc(err)}</div>`:''}
       ${wasNorm&&!err?'<div class="field-hint">Normalisée automatiquement</div>':''}
     `;
@@ -688,6 +707,7 @@ JSON uniquement.`;
         norm[f.key]=nv; rawNorm[f.key]=String(nv)!==String(v);
       } else { norm[f.key]=null; rawNorm[f.key]=false; }
     });
+    if(!norm['debtor_post_country_code']) norm['debtor_post_country_code']='France';
     inv.data=norm;inv.rawNorm=rawNorm;inv.repaired=parsed.repaired||false;
     inv.confidence=confidence(norm,S.fields);inv.status='extracted';inv.errors={};
   } catch(e){inv.status='error';inv.error=e.message;inv.data={};inv.confidence=0;}
@@ -885,6 +905,33 @@ function doRemove(){
   renderSidebar();updateBar();
   if(S.cur>=0) selectInv(S.cur);
   else{document.getElementById('emptyState').style.display='flex';document.getElementById('fieldsContent').style.display='none';document.getElementById('fieldsFooter').style.display='none';document.getElementById('pdfTitle').textContent='Aucune facture sélectionnée';document.getElementById('pdfTitle').style.color='var(--text3)';document.getElementById('pdfVp').innerHTML='<div class="pdf-placeholder"><svg width="36" height="36" viewBox="0 0 36 36" fill="none" style="opacity:.2;"><path d="M8 4h13l7 7v21H8V4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M21 4v7h7" stroke="currentColor" stroke-width="1.2"/></svg></div>';}
+}
+
+/* ══ COUNTRY AUTOCOMPLETE ════════════════════════════ */
+const COUNTRIES=['France','Afghanistan','Afrique du Sud','Albanie','Algérie','Allemagne','Andorre','Angola','Antigua-et-Barbuda','Arabie saoudite','Argentine','Arménie','Australie','Autriche','Azerbaïdjan','Bahamas','Bahreïn','Bangladesh','Barbade','Bélarus','Belgique','Belize','Bénin','Bhoutan','Bolivie','Bosnie-Herzégovine','Botswana','Brésil','Brunéi','Bulgarie','Burkina Faso','Burundi','Cabo Verde','Cambodge','Cameroun','Canada','Centrafrique','Chili','Chine','Chypre','Colombie','Comores','Congo','Corée du Nord','Corée du Sud','Costa Rica',"Côte d'Ivoire",'Croatie','Cuba','Danemark','Djibouti','Dominique','Égypte','Émirats arabes unis','Équateur','Érythrée','Espagne','Estonie','Eswatini','États-Unis','Éthiopie','Fidji','Finlande','Gabon','Gambie','Géorgie','Ghana','Grèce','Grenade','Guatemala','Guinée','Guinée-Bissau','Guinée équatoriale','Guyana','Haïti','Honduras','Hongrie','Inde','Indonésie','Irak','Iran','Irlande','Islande','Israël','Italie','Jamaïque','Japon','Jordanie','Kazakhstan','Kenya','Kirghizistan','Kiribati','Koweït','Laos','Lesotho','Lettonie','Liban','Libéria','Libye','Liechtenstein','Lituanie','Luxembourg','Madagascar','Malaisie','Malawi','Maldives','Mali','Malte','Maroc','Marshall','Maurice','Mauritanie','Mexique','Micronésie','Moldavie','Monaco','Mongolie','Monténégro','Mozambique','Myanmar','Namibie','Nauru','Népal','Nicaragua','Niger','Nigéria','Norvège','Nouvelle-Zélande','Oman','Ouganda','Pakistan','Palaos','Palestine','Panama','Papouasie-Nouvelle-Guinée','Paraguay','Pays-Bas','Pérou','Philippines','Pologne','Portugal','Qatar','République démocratique du Congo','République dominicaine','République tchèque','Roumanie','Royaume-Uni','Russie','Rwanda','Saint-Christophe-et-Niévès','Saint-Marin','Saint-Vincent-et-les-Grenadines','Sainte-Lucie','Salvador','Samoa','São Tomé-et-Príncipe','Sénégal','Serbie','Seychelles','Sierra Leone','Singapour','Slovaquie','Slovénie','Somalie','Soudan','Soudan du Sud','Sri Lanka','Suède','Suisse','Suriname','Syrie','Tadjikistan','Tanzanie','Tchad','Thaïlande','Timor oriental','Togo','Tonga','Trinité-et-Tobago','Tunisie','Turkménistan','Turquie','Tuvalu','Ukraine','Uruguay','Uzbekistan','Vanuatu','Vatican','Venezuela','Vietnam','Yémen','Zambie','Zimbabwe'];
+
+function deaccent(s){return s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();}
+
+function onCountryInput(input){
+  const drop=document.getElementById('countryDrop');
+  if(!drop) return;
+  const q=deaccent(input.value.trim());
+  const matches=q?COUNTRIES.filter(c=>deaccent(c).includes(q)):COUNTRIES;
+  if(!matches.length){drop.classList.remove('open');return;}
+  drop.innerHTML=matches.slice(0,30).map(c=>`<div class="country-opt" onmousedown="pickCountry('${c.replace(/'/g,"\\'")}',event)">${esc(c)}</div>`).join('');
+  drop.classList.add('open');
+}
+
+function pickCountry(val,e){
+  e.preventDefault();
+  const input=document.getElementById('fi_debtor_post_country_code');
+  if(input){input.value=val;onFI('debtor_post_country_code',val);}
+  closeCountryDrop();
+}
+
+function closeCountryDrop(){
+  const drop=document.getElementById('countryDrop');
+  if(drop) drop.classList.remove('open');
 }
 
 /* ══ UTILS ═══════════════════════════════════════════ */
