@@ -810,6 +810,72 @@ html.push(runSuite('Contenu du ZIP',[
     fn:({invoices,fields})=>getZipContents(invoices,fields).csvContent},
 ]));
 
+/* ══ PROXY VALIDATION LOGIC (mirrored from api/extract.js) ══ */
+
+function validateProxyMethod(method) {
+  if (method !== 'POST') return { status: 405, error: 'Method not allowed' };
+  return null;
+}
+
+function validateApiKeyPresence(key) {
+  if (!key) return { status: 500, error: 'API key not configured on server' };
+  return null;
+}
+
+/* ══ APP-SIDE: extract button disabled state ══ */
+
+function isExtractButtonDisabled(pending, busy) {
+  return pending === 0 || busy;
+}
+
+/* ══ APP-SIDE: Claude request body builder ══ */
+
+function buildClaudeRequestBody(b64, prompt) {
+  return {
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 1000,
+    messages: [{
+      role: 'user',
+      content: [
+        {type:'document', source:{type:'base64', media_type:'application/pdf', data:b64}},
+        {type:'text', text:prompt}
+      ]
+    }]
+  };
+}
+
+html.push('<h2>Proxy — validation des requêtes entrantes</h2>');
+html.push(runSuite('validateProxyMethod', [
+  {desc:'POST → autorisé (null)',   input:'POST',   expected:null, fn:validateProxyMethod},
+  {desc:'GET → rejeté 405',        input:'GET',    expected:{status:405,error:'Method not allowed'}, fn:validateProxyMethod},
+  {desc:'PUT → rejeté 405',        input:'PUT',    expected:{status:405,error:'Method not allowed'}, fn:validateProxyMethod},
+  {desc:'DELETE → rejeté 405',     input:'DELETE', expected:{status:405,error:'Method not allowed'}, fn:validateProxyMethod},
+]));
+
+html.push(runSuite('validateApiKeyPresence', [
+  {desc:'Clé présente → autorisé (null)',    input:'sk-ant-xxx',  expected:null, fn:validateApiKeyPresence},
+  {desc:'Clé vide → erreur 500',             input:'',            expected:{status:500,error:'API key not configured on server'}, fn:validateApiKeyPresence},
+  {desc:'Clé undefined → erreur 500',        input:undefined,     expected:{status:500,error:'API key not configured on server'}, fn:validateApiKeyPresence},
+  {desc:'Clé null → erreur 500',             input:null,          expected:{status:500,error:'API key not configured on server'}, fn:validateApiKeyPresence},
+]));
+
+html.push('<h2>État app — bouton Extraire sans clé API côté client</h2>');
+html.push(runSuite('isExtractButtonDisabled', [
+  {desc:'0 pending → désactivé',          input:{pending:0, busy:false}, expected:true,  fn:({pending,busy})=>isExtractButtonDisabled(pending,busy)},
+  {desc:'1 pending, pas occupé → activé', input:{pending:1, busy:false}, expected:false, fn:({pending,busy})=>isExtractButtonDisabled(pending,busy)},
+  {desc:'1 pending, occupé → désactivé',  input:{pending:1, busy:true},  expected:true,  fn:({pending,busy})=>isExtractButtonDisabled(pending,busy)},
+  {desc:'5 pending, pas occupé → activé', input:{pending:5, busy:false}, expected:false, fn:({pending,busy})=>isExtractButtonDisabled(pending,busy)},
+]));
+
+html.push('<h2>Proxy — structure du corps de requête envoyé au proxy</h2>');
+html.push(runSuite('buildClaudeRequestBody', [
+  {desc:'Modèle correct',                         input:{b64:'abc',   prompt:'test'},       expected:'claude-sonnet-4-20250514', fn:({b64,prompt})=>buildClaudeRequestBody(b64,prompt).model},
+  {desc:'max_tokens = 1000',                      input:{b64:'abc',   prompt:'test'},       expected:1000,                       fn:({b64,prompt})=>buildClaudeRequestBody(b64,prompt).max_tokens},
+  {desc:'Base64 PDF transmis dans messages',      input:{b64:'abc123',prompt:'test'},       expected:'abc123',                   fn:({b64,prompt})=>buildClaudeRequestBody(b64,prompt).messages[0].content[0].source.data},
+  {desc:'Prompt texte transmis dans messages',    input:{b64:'abc',   prompt:'mon prompt'}, expected:'mon prompt',               fn:({b64,prompt})=>buildClaudeRequestBody(b64,prompt).messages[0].content[1].text},
+  {desc:'Pas de x-api-key dans le body (côté serveur uniquement)', input:{b64:'abc', prompt:'test'}, expected:undefined, fn:({b64,prompt})=>buildClaudeRequestBody(b64,prompt)['x-api-key']},
+]));
+
 const summary = `<div class="summary">
     <div><div class="sum-n" style="color:#085041;">${totalPass}</div><div class="sum-l">Tests passés</div></div>
     <div><div class="sum-n" style="color:${totalFail>0?'#c0392b':'#085041'};">${totalFail}</div><div class="sum-l">Tests échoués</div></div>

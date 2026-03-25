@@ -319,17 +319,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 <div class="modal-bg" id="modalBg" onclick="maybeCloseModal(event)">
   <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-title">Paramètres</div>
-    <div class="modal-sub">Clé API, champs à extraire, nomenclature des fichiers.</div>
-
-    <div class="msec">
-      <div class="msec-t">Clé API Anthropic</div>
-      <label class="form-lbl">Clé (sk-ant-…)</label>
-      <div style="display:flex;gap:7px;">
-        <input type="password" class="form-inp" id="apiKeyInput" placeholder="sk-ant-api03-…" style="flex:1;"/>
-        <button class="btn btn-sm" onclick="testKey()">Tester</button>
-      </div>
-      <div class="key-st" id="keySt"></div>
-    </div>
+    <div class="modal-sub">Champs à extraire, nomenclature des fichiers.</div>
 
     <div class="msec">
       <div class="msec-t">Champs à extraire</div>
@@ -392,7 +382,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
 <script>
 /* ══ NORMALISATION v3 ══════════════════════════════ */
-const API = 'https://api.anthropic.com/v1/messages';
+const API = '/api/extract';
 
 function normalizeDate(raw) {
   if (!raw) return null;
@@ -474,7 +464,7 @@ function confidence(data, fields) {
 
 /* ══ STATE ══════════════════════════════════════════ */
 const S = {
-  apiKey:localStorage.getItem('anthropic_api_key')||'', fields:[
+  fields:[
     {label:'Nom du débiteur',    key:'debtor_company_name',          type:'text',   required:true},
     {label:'Adresse',            key:'debtor_post_street_1',         type:'text',   required:true},
     {label:'Code postal',        key:'debtor_post_postalcode',       type:'text',   required:true},
@@ -640,7 +630,7 @@ function updateBar(){
   const done=S.invoices.filter(i=>i.status==='validated'||i.status==='skipped').length;
   const total=S.invoices.length;
   const pending=S.invoices.filter(i=>i.status==='pending').length;
-  document.getElementById('btnExtract').disabled=pending===0||!S.apiKey||S.busy;
+  document.getElementById('btnExtract').disabled=pending===0||S.busy;
   document.getElementById('btnExport').style.display=done>0?'':'none';
   if(total>0){
     document.getElementById('progWrap').style.display='flex';
@@ -650,7 +640,6 @@ function updateBar(){
 }
 
 async function startExtraction(){
-  if(!S.apiKey){openModal();return;}
   const toEx=S.invoices.filter(i=>i.status==='pending');
   if(!toEx.length) return;
   S.busy=true;updateBar();
@@ -691,7 +680,7 @@ Règles :
 
 JSON uniquement.`;
 
-    const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json','x-api-key':S.apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:[{type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}},{type:'text',text:prompt}]}]})});
+    const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:[{type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}},{type:'text',text:prompt}]}]})});
     if(!r.ok){const e=await r.json();throw new Error(e.error?.message||r.statusText);}
     const res=await r.json();
     const txt=res.content.map(c=>c.text||'').join('');
@@ -748,7 +737,7 @@ function skipInvoice(){
 }
 
 async function reExtract(){
-  if(S.cur===-1||!S.apiKey) return;
+  if(S.cur===-1) return;
   const inv=S.invoices[S.cur];
   inv.status='pending';inv.data={};inv.errors={};inv.confidence=null;
   selectInv(S.cur);
@@ -803,7 +792,6 @@ function restart(){S.files=[];S.invoices=[];S.cur=-1;S.busy=false;hideExport();d
 
 /* ══ MODAL ═══════════════════════════════════════════ */
 function openModal(){
-  document.getElementById('apiKeyInput').value=S.apiKey;
   document.getElementById('nomSep').value=S.nomSep;
   renderFconf();renderNomToks();
   document.getElementById('modalBg').classList.add('show');
@@ -811,17 +799,8 @@ function openModal(){
 function closeModal(){document.getElementById('modalBg').classList.remove('show');}
 function maybeCloseModal(e){if(e.target===document.getElementById('modalBg'))closeModal();}
 function saveModal(){
-  S.apiKey=document.getElementById('apiKeyInput').value.trim();
-  if(S.apiKey) localStorage.setItem('anthropic_api_key',S.apiKey);
-  else localStorage.removeItem('anthropic_api_key');
   S.nomSep=document.getElementById('nomSep').value;
   closeModal();updateBar();
-}
-async function testKey(){
-  const k=document.getElementById('apiKeyInput').value.trim();if(!k)return;
-  const el=document.getElementById('keySt');el.textContent='Test…';
-  try{const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json','x-api-key':k,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:10,messages:[{role:'user',content:'ok'}]})});el.innerHTML=r.ok?'<span style="color:var(--teal);">Clé valide ✓</span>':'<span style="color:var(--red);">Clé invalide</span>';}
-  catch(e){el.innerHTML='<span style="color:var(--red);">Erreur réseau</span>';}
 }
 function renderFconf(){
   const c=document.getElementById('fconfList');c.innerHTML='';
