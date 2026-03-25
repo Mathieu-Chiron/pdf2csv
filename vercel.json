@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/", "destination": "/invoice-processor.html" },
+    { "source": "/((?!api/).*)", "destination": "/invoice-processor.html" }
+  ]
+}
