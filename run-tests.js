@@ -1,0 +1,246 @@
+/* Node.js test runner — mirrors tests.html logic */
+
+/* ══ CORE FUNCTIONS ══ */
+function normalizeDate(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) { const [,m,d]=s.split('-').map(Number); return (m<1||m>12||d<1||d>31)?null:s; }
+  const dmy=s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+  if (dmy) { const [,dd,mm,yyyy]=dmy; if(parseInt(mm)>12||parseInt(dd)>31) return null; return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`; }
+  const MO={jan:1,fév:2,fev:2,feb:2,mar:3,avr:4,apr:4,mai:5,may:5,jun:6,jui:6,jul:7,aoû:8,aou:8,aug:8,sep:9,oct:10,nov:11,déc:12,dec:12,january:1,february:2,march:3,april:4,june:6,july:7,august:8,september:9,october:10,november:11,december:12};
+  const t1=s.match(/^(\d{1,2})\s+([a-zéûôèA-Z]+)\.?\s+(\d{4})$/i);
+  if (t1){const k=t1[2].toLowerCase();const m=MO[k]||MO[k.slice(0,3)];if(m) return `${t1[3]}-${String(m).padStart(2,'0')}-${t1[1].padStart(2,'0')}`;}
+  const t2=s.match(/^([a-zA-Z]+)\s+(\d{1,2}),?\s+(\d{4})$/i);
+  if (t2){const k=t2[1].toLowerCase();const m=MO[k]||MO[k.slice(0,3)];if(m) return `${t2[3]}-${String(m).padStart(2,'0')}-${t2[2].padStart(2,'0')}`;}
+  const ts=s.match(/^(\d{4}-\d{2}-\d{2})T/); if (ts) return ts[1];
+  return null;
+}
+
+function normalizeAmount(raw) {
+  if (raw==null||raw==='') return null;
+  let s=String(raw).trim();
+  s=s.replace(/\b(EUR|USD|GBP|CHF|JPY)\b/gi,'').replace(/[€$£¥]/g,'').replace(/\s*[eE]\s*$/,'').trim();
+  s=s.replace(/(\d)[\s\u00A0](\d)/g,'$1$2').replace(/(\d)[\s\u00A0](\d)/g,'$1$2').trim();
+  if (!s) return null;
+  const D=(s.match(/\./g)||[]).length, C=(s.match(/,/g)||[]).length;
+  const pf=v=>{ const n=parseFloat(v); return isNaN(n)?null:n; };
+  if(!D&&!C) return pf(s);
+  if(!D&&C===1) return pf(s.replace(',','.'));
+  if(!C&&D===1) return pf(s);
+  if(!C&&D>1) return pf(s.replace(/\./g,''));
+  if(D>1&&C===1) return pf(s.replace(/\./g,'').replace(',','.'));
+  if(C>1&&D===1) return pf(s.replace(/,/g,''));
+  if(D===1&&C===1){ return s.lastIndexOf(',')>s.lastIndexOf('.') ? pf(s.replace('.','').replace(',','.')) : pf(s.replace(',','')); }
+  return pf(s.replace(',','.'));
+}
+
+function parseJSON(raw) {
+  if (!raw||typeof raw!=='string') return {ok:false,data:{},err:'Réponse vide'};
+  let t=raw.trim().replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```$/,'');
+  const m=t.match(/\{[\s\S]*\}/); if (!m) return {ok:false,data:{},err:'Aucun JSON trouvé'};
+  try { return {ok:true,data:JSON.parse(m[0])}; }
+  catch(e) { try { return {ok:true,data:JSON.parse(m[0].replace(/,\s*([}\]])/g,'$1')),repaired:true}; } catch(e2) { return {ok:false,data:{},err:'JSON invalide'}; } }
+}
+
+function vandn(value, f) {
+  const errs=[], empty=value==null||String(value).trim()==='';
+  if (f.required&&empty) return {valid:false,norm:value,errs:['Champ requis']};
+  if (empty) return {valid:true,norm:value,errs:[]};
+  let norm=value;
+  if (f.type==='date') { norm=normalizeDate(value); if (!norm) errs.push(`Date non reconnue : "${value}"`); else { const d=new Date(norm); if(isNaN(d.getTime())) errs.push('Date invalide'); if(d.getFullYear()<2000||d.getFullYear()>2099) errs.push('Année hors plage'); } }
+  if (f.type==='number') { norm=normalizeAmount(value); if (norm==null) errs.push(`Montant non reconnu : "${value}"`); else { if(norm<0) errs.push('Montant négatif'); if(norm>10_000_000) errs.push('Montant > 10M€'); } }
+  if (f.type==='text'&&String(value).length>500) errs.push('Valeur trop longue');
+  return {valid:errs.length===0,norm:norm??value,errs};
+}
+
+const FIELDS = [
+  {label:'Nom du débiteur',    key:'debtor_company_name',          type:'text',   required:true},
+  {label:'Adresse',            key:'debtor_post_street_1',         type:'text',   required:true},
+  {label:'Code postal',        key:'debtor_post_postalcode',       type:'text',   required:true},
+  {label:'Ville',              key:'debtor_post_city',             type:'text',   required:true},
+  {label:'Pays',               key:'debtor_post_country_code',     type:'text',   required:true},
+  {label:'N° de facture',      key:'invoice_number',               type:'text',   required:true},
+  {label:'Date émission',      key:'invoice_date',                 type:'date',   required:true},
+  {label:'Échéance',           key:'invoice_due_date',             type:'date',   required:true},
+  {label:'Montant TTC',        key:'amount_ttc',                   type:'number', required:true},
+  {label:'Montant total',      key:'invoice_total_amount_inc_vat', type:'number', required:true},
+  {label:'Montant en suspens', key:'invoice_open_amount_inc_vat',  type:'number', required:true},
+];
+
+function checkFields(inv) {
+  inv.errors={}; let ok=true;
+  FIELDS.forEach(f=>{ const v=inv.data[f.key],res=vandn(v,f); if(!res.valid){inv.errors[f.key]=res.errs[0];ok=false;} else if(res.norm!==v&&res.norm!=null) inv.data[f.key]=res.norm; });
+  return ok;
+}
+function simulateValidation(data,fields){const errors={};let ok=true;fields.forEach(f=>{const v=data[f.key],res=vandn(v,f);if(!res.valid){errors[f.key]=res.errs[0];ok=false;}});return{ok,errors};}
+function allDone(invoices){return invoices.length>0&&invoices.every(x=>x.status==='validated'||x.status==='skipped');}
+function isFieldEmpty(inv,key){const raw=inv.data[key];return inv.status!=='pending'&&(raw==null||String(raw).trim()==='');}
+function detectDuplicates(existingNames,newNames){const duplicates=[],added=[];newNames.forEach(name=>{if(existingNames.includes(name)||added.includes(name))duplicates.push(name);else added.push(name);});return{duplicates,added};}
+function canShowFinishButton(invoices){if(!invoices.length)return false;return invoices.every(x=>x.status==='validated'||x.status==='skipped');}
+function shouldWarnBeforeExport(invoices){return invoices.some(x=>x.status==='skipped');}
+function getSkippedInvoices(invoices){return invoices.filter(x=>x.status==='skipped').map(x=>x.file.name);}
+function buildExportWarningMessage(invoices){const skipped=getSkippedInvoices(invoices);if(!skipped.length)return null;const count=skipped.length;const plural=count>1;return{count,names:skipped,message:`${count} facture${plural?'s':''} ignorée${plural?'s':''} ${plural?'ne seront':'ne sera'} pas exportée${plural?'s':''}.`};}
+function makeInvoice(status,data={}){return{file:{name:'test.pdf'},status,data:{...data},errors:{},rawNorm:{},confidence:null};}
+function simulateOnFI(inv,key,val){inv.data[key]=val;if(inv.errors)delete inv.errors[key];if(inv.status==='skipped'||inv.status==='validated')inv.status='extracted';return inv;}
+function getButtonLabel(inv,invoices){const ad=invoices.length>0&&invoices.every(x=>x.status==='validated'||x.status==='skipped');const cv=inv.status==='validated';return(ad&&cv)?'Terminer et exporter ✓':'Valider ✓';}
+function simulatePreExportCheck(inv,invoices){const ok=checkFields(inv);if(!ok)return{blocked:true,reason:'missing_fields',errors:inv.errors};const skipped=invoices.filter(x=>x.status==='skipped');if(skipped.length)return{blocked:true,reason:'skipped_warning',skipped:skipped.map(x=>x.file.name)};return{blocked:false};}
+
+const inv  = name=>({file:{name},status:'validated'});
+const skip = name=>({file:{name},status:'skipped'});
+const pend = name=>({file:{name},status:'pending'});
+const extr = name=>({file:{name},status:'extracted'});
+
+const fullData = {
+  debtor_company_name:'ACME SAS',debtor_post_street_1:'12 rue de la Paix',
+  debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',
+  invoice_number:'F-2024-001',invoice_date:'2024-03-15',invoice_due_date:'2024-04-15',
+  amount_ttc:'1500.50',invoice_total_amount_inc_vat:'1500.50',invoice_open_amount_inc_vat:'250.00'
+};
+
+/* ══ TEST ENGINE ══ */
+let pass=0, fail=0;
+function eq(a,b){return JSON.stringify(a)===JSON.stringify(b);}
+function test(desc,got,expected){
+  const ok=eq(got,expected);
+  if(ok){pass++;process.stdout.write('  ✓ '+desc+'\n');}
+  else{fail++;process.stdout.write('  ✗ '+desc+'\n    got:      '+JSON.stringify(got)+'\n    expected: '+JSON.stringify(expected)+'\n');}
+}
+function suite(name,fn){console.log('\n'+name);fn();}
+
+/* ══ SUITES ══ */
+suite('normalizeDate', ()=>{
+  test('ISO correct',                  normalizeDate('2024-03-15'),          '2024-03-15');
+  test('DD/MM/YYYY',                   normalizeDate('15/03/2024'),          '2024-03-15');
+  test('DD-MM-YYYY',                   normalizeDate('15-03-2024'),          '2024-03-15');
+  test('DD.MM.YYYY',                   normalizeDate('15.03.2024'),          '2024-03-15');
+  test('D/M/YYYY sans zéro',           normalizeDate('5/3/2024'),            '2024-03-05');
+  test('15 mars 2024',                 normalizeDate('15 mars 2024'),        '2024-03-15');
+  test('15 fév. 2024',                 normalizeDate('15 fév. 2024'),        '2024-02-15');
+  test('March 15, 2024',               normalizeDate('March 15, 2024'),      '2024-03-15');
+  test('15 February 2024',             normalizeDate('15 February 2024'),    '2024-02-15');
+  test('ISO datetime tronqué',         normalizeDate('2024-03-15T12:00:00Z'),'2024-03-15');
+  test('Vide → null',                  normalizeDate(''),                    null);
+  test('Invalide → null',              normalizeDate('pas une date'),        null);
+  test('Mois > 12 → null',             normalizeDate('15/13/2024'),          null);
+});
+
+suite('normalizeAmount', ()=>{
+  test('Entier simple',                normalizeAmount('1500'),              1500);
+  test('Décimal point',                normalizeAmount('1500.50'),           1500.50);
+  test('Décimal virgule',              normalizeAmount('1500,50'),           1500.50);
+  test('Milliers point décimal virgule',normalizeAmount('1.500,50'),         1500.50);
+  test('Milliers virgule décimal point',normalizeAmount('1,500.50'),         1500.50);
+  test('Espace + virgule',             normalizeAmount('1 500,50'),          1500.50);
+  test('€ suffixe',                    normalizeAmount('1 500,50 €'),        1500.50);
+  test('€ préfixe',                    normalizeAmount('€1500.50'),          1500.50);
+  test('$ USD',                        normalizeAmount('$1,500.00'),         1500.00);
+  test('EUR libellé',                  normalizeAmount('1500.50 EUR'),       1500.50);
+  test('Zéro',                         normalizeAmount('0'),                 0);
+  test('Vide → null',                  normalizeAmount(''),                  null);
+  test('Null → null',                  normalizeAmount(null),                null);
+  test('Texte → null',                 normalizeAmount('N/A'),               null);
+});
+
+suite('parseJSON', ()=>{
+  const p=r=>{const x=parseJSON(r);return{ok:x.ok,data:x.data};};
+  test('JSON propre',       p('{"debtor_company_name":"ACME"}'),          {ok:true,data:{debtor_company_name:'ACME'}});
+  test('Backticks',         p('```json\n{"debtor_company_name":"ACME"}\n```'), {ok:true,data:{debtor_company_name:'ACME'}});
+  test('Texte autour',      p('Voici:\n{"debtor_company_name":"ACME"}\nMerci.'), {ok:true,data:{debtor_company_name:'ACME'}});
+  test('Virgule finale',    p('{"debtor_company_name":"ACME",}'),         {ok:true,data:{debtor_company_name:'ACME'}});
+  test('Vide → false',      parseJSON('').ok,                             false);
+  test('Pas de JSON → false', parseJSON('Désolé.').ok,                   false);
+});
+
+suite('vandn — champs requis', ()=>{
+  FIELDS.forEach(f=>test(`${f.key} manquant → invalide`, vandn(null,f).valid, false));
+});
+
+suite('vandn — champs valides', ()=>{
+  test('text valide',   vandn('ACME',{type:'text',required:true}).valid,    true);
+  test('date valide',   vandn('2024-03-15',{type:'date',required:true}).valid, true);
+  test('number valide', vandn('1500.50',{type:'number',required:true}).valid, true);
+  test('date invalide', vandn('pas-une-date',{type:'date',required:true}).valid, false);
+  test('montant invalide', vandn('abc',{type:'number',required:true}).valid, false);
+  test('montant négatif', vandn('-100',{type:'number',required:true}).valid, false);
+  test('année hors plage', vandn('15/03/1985',{type:'date',required:true}).valid, false);
+});
+
+suite('checkFields', ()=>{
+  test('Tous champs valides',       checkFields(makeInvoice('extracted',JSON.parse(JSON.stringify(fullData)))), true);
+  test('Nom manquant',              checkFields(makeInvoice('extracted',{...fullData,debtor_company_name:null})), false);
+  test('Date invalide',             checkFields(makeInvoice('extracted',{...fullData,invoice_date:'not-a-date'})), false);
+  test('Facture ignorée complète',  checkFields(makeInvoice('skipped',JSON.parse(JSON.stringify(fullData)))), true);
+  test('Facture ignorée vide',      checkFields(makeInvoice('skipped',{})), false);
+  const inv2=makeInvoice('extracted',{...fullData,debtor_company_name:null});checkFields(inv2);
+  test('Erreurs enregistrées',      inv2.errors.debtor_company_name, 'Champ requis');
+});
+
+suite('onFI — reset statut', ()=>{
+  test('skipped → extracted',  simulateOnFI(makeInvoice('skipped',fullData),'debtor_company_name','X').status, 'extracted');
+  test('validated → extracted',simulateOnFI(makeInvoice('validated',fullData),'debtor_company_name','X').status,'extracted');
+  test('extracted → extracted',simulateOnFI(makeInvoice('extracted',fullData),'debtor_company_name','X').status,'extracted');
+  test('pending → pending',    simulateOnFI(makeInvoice('pending',{}),'debtor_company_name','X').status,'pending');
+  const i2=makeInvoice('extracted',fullData);simulateOnFI(i2,'debtor_company_name','Nouveau');
+  test('Valeur mise à jour',   i2.data.debtor_company_name, 'Nouveau');
+  const i3={...makeInvoice('extracted',fullData),errors:{debtor_company_name:'Champ requis'}};simulateOnFI(i3,'debtor_company_name','X');
+  test('Erreur effacée',       i3.errors.debtor_company_name, undefined);
+});
+
+suite('getButtonLabel', ()=>{
+  test('extracted + pending → Valider',        getButtonLabel(makeInvoice('extracted'),[makeInvoice('extracted'),makeInvoice('pending')]),'Valider ✓');
+  test('validated + all validated → Terminer', getButtonLabel(makeInvoice('validated'),[makeInvoice('validated'),makeInvoice('validated')]),'Terminer et exporter ✓');
+  test('skipped sélectionné → Valider',        getButtonLabel(makeInvoice('skipped'),[makeInvoice('validated'),makeInvoice('skipped')]),'Valider ✓');
+  test('validated + skipped → Terminer',       getButtonLabel(makeInvoice('validated'),[makeInvoice('validated'),makeInvoice('skipped')]),'Terminer et exporter ✓');
+});
+
+suite('canShowFinishButton', ()=>{
+  test('Aucune',              canShowFinishButton([]),false);
+  test('Pending',             canShowFinishButton([pend('A')]),false);
+  test('Extracted',           canShowFinishButton([extr('A')]),false);
+  test('Toutes validées',     canShowFinishButton([inv('A'),inv('B')]),true);
+  test('Validée + ignorée',   canShowFinishButton([inv('A'),skip('B')]),true);
+  test('Validée + pending',   canShowFinishButton([inv('A'),pend('B')]),false);
+});
+
+suite('shouldWarnBeforeExport', ()=>{
+  test('Aucune ignorée → false',  shouldWarnBeforeExport([inv('A'),inv('B')]),false);
+  test('1 ignorée → true',        shouldWarnBeforeExport([inv('A'),skip('B')]),true);
+  test('Toutes ignorées → true',  shouldWarnBeforeExport([skip('A'),skip('B')]),true);
+});
+
+suite('buildExportWarningMessage', ()=>{
+  test('Aucune → null',     buildExportWarningMessage([inv('A'),inv('B')]),null);
+  test('1 ignorée',         buildExportWarningMessage([inv('A'),skip('B')]),{count:1,names:['B'],message:'1 facture ignorée ne sera pas exportée.'});
+  test('2 ignorées',        buildExportWarningMessage([inv('A'),skip('B'),skip('C')]),{count:2,names:['B','C'],message:'2 factures ignorées ne seront pas exportées.'});
+});
+
+suite('detectDuplicates', ()=>{
+  test('Aucun doublon',      detectDuplicates([],['A','B']),{duplicates:[],added:['A','B']});
+  test('1 doublon',          detectDuplicates(['A'],['A']),{duplicates:['A'],added:[]});
+  test('Doublon + nouveau',  detectDuplicates(['A'],['A','B']),{duplicates:['A'],added:['B']});
+  test('2 doublons',         detectDuplicates(['A','B'],['A','B']),{duplicates:['A','B'],added:[]});
+  test('Même fichier x2',    detectDuplicates([],['A','A']),{duplicates:['A'],added:['A']});
+});
+
+suite('simulatePreExportCheck', ()=>{
+  test('Tout valide → export',      simulatePreExportCheck(makeInvoice('validated',JSON.parse(JSON.stringify(fullData))),[makeInvoice('validated',fullData)]),{blocked:false});
+  const i2=makeInvoice('validated',{...fullData,debtor_company_name:null});
+  test('Champ manquant → bloqué',   simulatePreExportCheck(i2,[]).blocked, true);
+  test('Champ manquant → raison',   simulatePreExportCheck(makeInvoice('validated',{...fullData,debtor_company_name:null}),[]).reason,'missing_fields');
+  const i3=makeInvoice('validated',JSON.parse(JSON.stringify(fullData)));
+  test('Ignorées → skipped_warning',simulatePreExportCheck(i3,[makeInvoice('validated'),makeInvoice('skipped')]).reason,'skipped_warning');
+});
+
+suite('Intégration: ignorée → éditée → validée', ()=>{
+  test('Edition → extracted',       simulateOnFI(makeInvoice('skipped',fullData),'debtor_company_name','Nouveau').status,'extracted');
+  test('checkFields après édition', checkFields(makeInvoice('extracted',JSON.parse(JSON.stringify(fullData)))),true);
+  const i=makeInvoice('extracted',JSON.parse(JSON.stringify(fullData)));if(checkFields(i))i.status='validated';
+  test('Après validation → validated', i.status,'validated');
+  test('Plus dans skipped list',    getSkippedInvoices([makeInvoice('validated'),makeInvoice('validated')]),[]);
+});
+
+/* ══ RESULTS ══ */
+console.log(`\n${'─'.repeat(50)}`);
+console.log(`✓ ${pass} passed   ${fail>0?'✗ '+fail+' failed':''}`);
+console.log('─'.repeat(50));
+if(fail>0) process.exit(1);

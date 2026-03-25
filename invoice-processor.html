@@ -358,6 +358,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   <div class="dup-toast-body" id="dupToastBody"></div>
 </div>
 
+<!-- ═══ SKIPPED WARNING MODAL ════════════════════════ -->
+<div class="modal-bg" id="skipWarnBg">
+  <div class="modal" onclick="event.stopPropagation()" style="max-width:440px;">
+    <div class="modal-title">Factures ignorées</div>
+    <div class="modal-sub" id="skipWarnSub"></div>
+    <div id="skipWarnList" style="margin-bottom:16px;font-size:12px;color:var(--text2);line-height:1.8;"></div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeSkipWarn()">Annuler et modifier</button>
+      <button class="btn btn-p" onclick="closeSkipWarnAndExport()">Procéder et exporter</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ REMOVE CONFIRM ════════════════════════════════ -->
 <div class="modal-bg" id="removeBg">
   <div class="modal" onclick="event.stopPropagation()" style="max-width:360px;">
@@ -527,8 +540,9 @@ function selectInv(i) {
   renderFieldsUI(inv);
   renderBadges(inv);
   const allDone=S.invoices.length>0&&S.invoices.every(x=>x.status==='validated'||x.status==='skipped');
+  const currentValidated=inv.status==='validated';
   const btn=document.getElementById('btnValidate');
-  if(btn){if(allDone){btn.textContent='Terminer et exporter ✓';btn.onclick=showExport;}else{btn.textContent='Valider ✓';btn.onclick=validateInvoice;}}
+  if(btn){if(allDone&&currentValidated){btn.textContent='Terminer et exporter ✓';btn.onclick=preExportCheck;}else{btn.textContent='Valider ✓';btn.onclick=validateInvoice;}}
 }
 
 /* ══ PDF PREVIEW ═════════════════════════════════════ */
@@ -576,8 +590,15 @@ function renderFieldsUI(inv) {
 
 function onFI(key,val){
   if(S.cur===-1) return;
-  S.invoices[S.cur].data[key]=val;
-  if(S.invoices[S.cur].errors) delete S.invoices[S.cur].errors[key];
+  const inv=S.invoices[S.cur];
+  inv.data[key]=val;
+  if(inv.errors) delete inv.errors[key];
+  if(inv.status==='skipped'||inv.status==='validated') {
+    inv.status='extracted';
+    renderSidebar();
+    const btn=document.getElementById('btnValidate');
+    if(btn){btn.textContent='Valider ✓';btn.onclick=validateInvoice;}
+  }
 }
 
 function renderBadges(inv) {
@@ -673,20 +694,26 @@ JSON uniquement.`;
 }
 
 /* ══ VALIDATE / SKIP / RE-EXTRACT ════════════════════ */
-function validateInvoice(){
-  if(S.cur===-1) return;
-  const inv=S.invoices[S.cur];inv.errors={};let ok=true;
+function checkFields(inv){
+  inv.errors={};let ok=true;
   S.fields.forEach(f=>{
     const v=inv.data[f.key],res=vandn(v,f);
     if(!res.valid){inv.errors[f.key]=res.errs[0];ok=false;}
     else if(res.norm!==v&&res.norm!=null) inv.data[f.key]=res.norm;
   });
+  return ok;
+}
+
+function validateInvoice(){
+  if(S.cur===-1) return;
+  const inv=S.invoices[S.cur];
+  const ok=checkFields(inv);
   if(!ok){selectInv(S.cur);return;}
   inv.status='validated';renderSidebar();renderBadges(inv);updateBar();
   const allDone=S.invoices.length>0&&S.invoices.every(x=>x.status==='validated'||x.status==='skipped');
   if(allDone){
     const btn=document.getElementById('btnValidate');
-    if(btn){btn.textContent='Terminer et exporter ✓';btn.onclick=showExport;}
+    if(btn){btn.textContent='Terminer et exporter ✓';btn.onclick=preExportCheck;}
     return;
   }
   const next=S.invoices.findIndex((x,i)=>i>S.cur&&(x.status==='extracted'||x.status==='error'));
@@ -726,6 +753,7 @@ function showExport(){
   tbody.innerHTML='';
   S.invoices.forEach(inv=>{
     const tr=document.createElement('tr');
+    if(inv.status==='validated') tr.style.cssText='background:var(--teal-bg);';
     tr.innerHTML=`<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(inv.file.name)}</td>`
       +S.fields.map(f=>`<td>${esc(String(inv.data[f.key]??'—'))}</td>`).join('')
       +`<td><span class="badge ${inv.status==='validated'?'b-ok':'b-warn'}">${inv.status==='validated'?'Validée':'Ignorée'}</span></td>`;
@@ -811,6 +839,25 @@ function renderNomPrev(){
   const parts=S.nomenclature.map(k=>{const f=S.fields.find(x=>x.key===k);return f?`[${f.label||k}]`:`[${k}]`;});
   document.getElementById('nomPrev').textContent=parts.length?'Aperçu : '+parts.join(sep)+'.pdf':'Aperçu : (nom original conservé)';
 }
+
+/* ══ PRE-EXPORT CHECK ════════════════════════════════ */
+function preExportCheck(){
+  if(S.cur>=0){
+    const inv=S.invoices[S.cur];
+    if(!checkFields(inv)){selectInv(S.cur);return;}
+  }
+  const skipped=S.invoices.filter(x=>x.status==='skipped');
+  if(!skipped.length){showExport();return;}
+  const count=skipped.length;
+  const plural=count>1;
+  document.getElementById('skipWarnSub').textContent=
+    `${count} facture${plural?'s':''} ignorée${plural?'s':''} ${plural?'ne seront':'ne sera'} pas incluse${plural?'s':''} dans l'export.`;
+  document.getElementById('skipWarnList').innerHTML=
+    skipped.map(inv=>`• <b>${esc(inv.file.name)}</b>`).join('<br>');
+  document.getElementById('skipWarnBg').classList.add('show');
+}
+function closeSkipWarn(){document.getElementById('skipWarnBg').classList.remove('show');}
+function closeSkipWarnAndExport(){closeSkipWarn();showExport();}
 
 /* ══ DUPLICATE TOAST ════════════════════════════════ */
 let _dupTimer=null;

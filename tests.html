@@ -448,12 +448,278 @@ html.push(runSuite('Détection des doublons', [
     fn:({existing,new:n})=>detectDuplicates(existing,n)},
 ]));
 
-document.getElementById('root').innerHTML = html.join('') +
-  `<div class="summary">
+/* ══ PRE-EXPORT LOGIC (same as app) ══ */
+function canShowFinishButton(invoices) {
+  if (!invoices.length) return false;
+  return invoices.every(x => x.status === 'validated' || x.status === 'skipped');
+}
+
+function shouldWarnBeforeExport(invoices) {
+  return invoices.some(x => x.status === 'skipped');
+}
+
+function getSkippedInvoices(invoices) {
+  return invoices.filter(x => x.status === 'skipped').map(x => x.file.name);
+}
+
+function buildExportWarningMessage(invoices) {
+  const skipped = getSkippedInvoices(invoices);
+  if (!skipped.length) return null;
+  return {
+    count: skipped.length,
+    names: skipped,
+    message: `${skipped.length} facture${skipped.length > 1 ? 's' : ''} ignorée${skipped.length > 1 ? 's' : ''} ${skipped.length > 1 ? 'ne seront' : 'ne sera'} pas exportée${skipped.length > 1 ? 's' : ''}.`
+  };
+}
+
+const inv = name => ({file:{name}, status:'validated'});
+const skip = name => ({file:{name}, status:'skipped'});
+const pend = name => ({file:{name}, status:'pending'});
+const extr = name => ({file:{name}, status:'extracted'});
+
+html.push('<h2>Logique avant export — canShowFinishButton</h2>');
+html.push(runSuite('Affichage du bouton "Terminer et exporter"', [
+  {desc:'Aucune facture → bouton caché',
+    input:[], expected:false, fn:canShowFinishButton},
+  {desc:'1 facture pending → bouton caché',
+    input:[pend('A.pdf')], expected:false, fn:canShowFinishButton},
+  {desc:'1 facture extracted → bouton caché',
+    input:[extr('A.pdf')], expected:false, fn:canShowFinishButton},
+  {desc:'1 validated + 1 pending → bouton caché',
+    input:[inv('A.pdf'), pend('B.pdf')], expected:false, fn:canShowFinishButton},
+  {desc:'1 validated + 1 extracted → bouton caché',
+    input:[inv('A.pdf'), extr('B.pdf')], expected:false, fn:canShowFinishButton},
+  {desc:'Toutes validées → bouton visible',
+    input:[inv('A.pdf'), inv('B.pdf'), inv('C.pdf')], expected:true, fn:canShowFinishButton},
+  {desc:'Toutes ignorées → bouton visible',
+    input:[skip('A.pdf'), skip('B.pdf')], expected:true, fn:canShowFinishButton},
+  {desc:'Mélange validées + ignorées → bouton visible',
+    input:[inv('A.pdf'), skip('B.pdf'), inv('C.pdf')], expected:true, fn:canShowFinishButton},
+  {desc:'1 validée + 1 ignorée + 1 pending → bouton caché',
+    input:[inv('A.pdf'), skip('B.pdf'), pend('C.pdf')], expected:false, fn:canShowFinishButton},
+]));
+
+html.push('<h2>Logique avant export — shouldWarnBeforeExport</h2>');
+html.push(runSuite('Avertissement avant export (factures ignorées)', [
+  {desc:'Aucune ignorée → pas d\'avertissement',
+    input:[inv('A.pdf'), inv('B.pdf')], expected:false, fn:shouldWarnBeforeExport},
+  {desc:'1 ignorée → avertissement',
+    input:[inv('A.pdf'), skip('B.pdf')], expected:true, fn:shouldWarnBeforeExport},
+  {desc:'Toutes ignorées → avertissement',
+    input:[skip('A.pdf'), skip('B.pdf')], expected:true, fn:shouldWarnBeforeExport},
+  {desc:'1 seule facture ignorée → avertissement',
+    input:[skip('A.pdf')], expected:true, fn:shouldWarnBeforeExport},
+  {desc:'Toutes validées → pas d\'avertissement',
+    input:[inv('A.pdf'), inv('B.pdf'), inv('C.pdf')], expected:false, fn:shouldWarnBeforeExport},
+]));
+
+html.push('<h2>Logique avant export — getSkippedInvoices & buildExportWarningMessage</h2>');
+html.push(runSuite('Contenu du message d\'avertissement', [
+  {desc:'Aucune ignorée → liste vide',
+    input:[inv('A.pdf'), inv('B.pdf')],
+    expected:[],
+    fn:getSkippedInvoices},
+  {desc:'1 ignorée → son nom dans la liste',
+    input:[inv('A.pdf'), skip('B.pdf')],
+    expected:['B.pdf'],
+    fn:getSkippedInvoices},
+  {desc:'2 ignorées → leurs noms dans la liste',
+    input:[inv('A.pdf'), skip('B.pdf'), skip('C.pdf')],
+    expected:['B.pdf','C.pdf'],
+    fn:getSkippedInvoices},
+  {desc:'Message singulier (1 ignorée)',
+    input:[inv('A.pdf'), skip('B.pdf')],
+    expected:{count:1, names:['B.pdf'], message:'1 facture ignorée ne sera pas exportée.'},
+    fn:buildExportWarningMessage},
+  {desc:'Message pluriel (2 ignorées)',
+    input:[inv('A.pdf'), skip('B.pdf'), skip('C.pdf')],
+    expected:{count:2, names:['B.pdf','C.pdf'], message:'2 factures ignorées ne seront pas exportées.'},
+
+    fn:buildExportWarningMessage},
+  {desc:'Aucune ignorée → null',
+    input:[inv('A.pdf'), inv('B.pdf')],
+    expected:null,
+    fn:buildExportWarningMessage},
+]));
+
+/* ══ NEW LOGIC: checkFields, onFI status reset, button state ══ */
+
+function checkFields(inv) {
+  inv.errors = {}; let ok = true;
+  FIELDS.forEach(f => {
+    const v = inv.data[f.key], res = vandn(v, f);
+    if (!res.valid) { inv.errors[f.key] = res.errs[0]; ok = false; }
+    else if (res.norm !== v && res.norm != null) inv.data[f.key] = res.norm;
+  });
+  return ok;
+}
+
+function makeInvoice(status, data={}) {
+  return { file:{name:'test.pdf'}, status, data:{...data}, errors:{}, rawNorm:{}, confidence:null };
+}
+
+function simulateOnFI(inv, key, val) {
+  inv.data[key] = val;
+  if (inv.errors) delete inv.errors[key];
+  if (inv.status === 'skipped' || inv.status === 'validated') inv.status = 'extracted';
+  return inv;
+}
+
+function getButtonLabel(inv, invoices) {
+  const allDone = invoices.length > 0 && invoices.every(x => x.status === 'validated' || x.status === 'skipped');
+  const currentValidated = inv.status === 'validated';
+  return (allDone && currentValidated) ? 'Terminer et exporter ✓' : 'Valider ✓';
+}
+
+function simulatePreExportCheck(inv, invoices) {
+  const ok = checkFields(inv);
+  if (!ok) return { blocked: true, reason: 'missing_fields', errors: inv.errors };
+  const skipped = invoices.filter(x => x.status === 'skipped');
+  if (skipped.length) return { blocked: true, reason: 'skipped_warning', skipped: skipped.map(x => x.file.name) };
+  return { blocked: false };
+}
+
+const fullData = {
+  debtor_company_name:'ACME SAS', debtor_post_street_1:'12 rue de la Paix',
+  debtor_post_postalcode:'75001', debtor_post_city:'Paris', debtor_post_country_code:'FR',
+  invoice_number:'F-2024-001', invoice_date:'2024-03-15', invoice_due_date:'2024-04-15',
+  amount_ttc:'1500.50', invoice_total_amount_inc_vat:'1500.50', invoice_open_amount_inc_vat:'250.00'
+};
+
+html.push('<h2>checkFields — validation partagée (Valider + Terminer et exporter)</h2>');
+html.push(runSuite('checkFields sur tous les champs', [
+  {desc:'Tous les champs remplis → valide',
+    input:makeInvoice('extracted', fullData),
+    expected:true,
+    fn:inv=>checkFields(JSON.parse(JSON.stringify(inv)))},
+  {desc:'Nom manquant → invalide',
+    input:makeInvoice('extracted', {...fullData, debtor_company_name:null}),
+    expected:false,
+    fn:inv=>checkFields(JSON.parse(JSON.stringify(inv)))},
+  {desc:'Date invalide → invalide',
+    input:makeInvoice('extracted', {...fullData, invoice_date:'not-a-date'}),
+    expected:false,
+    fn:inv=>checkFields(JSON.parse(JSON.stringify(inv)))},
+  {desc:'Montant invalide → invalide',
+    input:makeInvoice('extracted', {...fullData, amount_ttc:'abc'}),
+    expected:false,
+    fn:inv=>checkFields(JSON.parse(JSON.stringify(inv)))},
+  {desc:'Facture ignorée avec tous champs → valide',
+    input:makeInvoice('skipped', fullData),
+    expected:true,
+    fn:inv=>checkFields(JSON.parse(JSON.stringify(inv)))},
+  {desc:'Facture ignorée sans champs → invalide',
+    input:makeInvoice('skipped', {}),
+    expected:false,
+    fn:inv=>checkFields(JSON.parse(JSON.stringify(inv)))},
+  {desc:'Erreurs bien enregistrées sur l\'objet',
+    input:makeInvoice('extracted', {...fullData, debtor_company_name:null, invoice_date:''}),
+    expected:{debtor_company_name:'Champ requis', invoice_date:'Champ requis'},
+    fn:inv=>{ const c=JSON.parse(JSON.stringify(inv)); checkFields(c); return c.errors; }},
+]));
+
+html.push('<h2>onFI — reset de statut lors de l\'édition</h2>');
+html.push(runSuite('Édition d\'une facture ignorée ou validée', [
+  {desc:'Éditer une facture ignorée → passe à extracted',
+    input:makeInvoice('skipped', fullData),
+    expected:'extracted',
+    fn:inv=>{ simulateOnFI(inv,'debtor_company_name','Nouveau nom'); return inv.status; }},
+  {desc:'Éditer une facture validée → passe à extracted',
+    input:makeInvoice('validated', fullData),
+    expected:'extracted',
+    fn:inv=>{ simulateOnFI(inv,'debtor_company_name','Nouveau nom'); return inv.status; }},
+  {desc:'Éditer une facture extracted → reste extracted',
+    input:makeInvoice('extracted', fullData),
+    expected:'extracted',
+    fn:inv=>{ simulateOnFI(inv,'debtor_company_name','Nouveau nom'); return inv.status; }},
+  {desc:'Éditer une facture pending → reste pending',
+    input:makeInvoice('pending', {}),
+    expected:'pending',
+    fn:inv=>{ simulateOnFI(inv,'debtor_company_name','Nouveau nom'); return inv.status; }},
+  {desc:'La valeur du champ est bien mise à jour',
+    input:makeInvoice('extracted', fullData),
+    expected:'Nouveau nom',
+    fn:inv=>{ simulateOnFI(inv,'debtor_company_name','Nouveau nom'); return inv.data.debtor_company_name; }},
+  {desc:'L\'erreur du champ est effacée après édition',
+    input:{...makeInvoice('extracted', fullData), errors:{debtor_company_name:'Champ requis'}},
+    expected:undefined,
+    fn:inv=>{ simulateOnFI(inv,'debtor_company_name','ACME'); return inv.errors.debtor_company_name; }},
+]));
+
+html.push('<h2>Bouton — label selon statut courant</h2>');
+html.push(runSuite('getButtonLabel', [
+  {desc:'Facture en cours, autres pending → Valider',
+    input:{inv:makeInvoice('extracted'), invoices:[makeInvoice('extracted'),makeInvoice('pending')]},
+    expected:'Valider ✓',
+    fn:({inv,invoices})=>getButtonLabel(inv,invoices)},
+  {desc:'Facture validée, toutes validées → Terminer et exporter',
+    input:{inv:makeInvoice('validated'), invoices:[makeInvoice('validated'),makeInvoice('validated')]},
+    expected:'Terminer et exporter ✓',
+    fn:({inv,invoices})=>getButtonLabel(inv,invoices)},
+  {desc:'Facture ignorée sélectionnée, autres validées → Valider',
+    input:{inv:makeInvoice('skipped'), invoices:[makeInvoice('validated'),makeInvoice('skipped')]},
+    expected:'Valider ✓',
+    fn:({inv,invoices})=>getButtonLabel(inv,invoices)},
+  {desc:'Facture validée, 1 autre ignorée → Terminer et exporter',
+    input:{inv:makeInvoice('validated'), invoices:[makeInvoice('validated'),makeInvoice('skipped')]},
+    expected:'Terminer et exporter ✓',
+    fn:({inv,invoices})=>getButtonLabel(inv,invoices)},
+  {desc:'Facture extracted sélectionnée, autres validées → Valider',
+    input:{inv:makeInvoice('extracted'), invoices:[makeInvoice('validated'),makeInvoice('extracted')]},
+    expected:'Valider ✓',
+    fn:({inv,invoices})=>getButtonLabel(inv,invoices)},
+]));
+
+html.push('<h2>preExportCheck — vérification avant export</h2>');
+html.push(runSuite('Scénarios de pré-export', [
+  {desc:'Tous champs valides, aucune ignorée → export direct',
+    input:{inv:makeInvoice('validated',fullData), invoices:[makeInvoice('validated',fullData)]},
+    expected:{blocked:false},
+    fn:({inv,invoices})=>simulatePreExportCheck(JSON.parse(JSON.stringify(inv)),invoices)},
+  {desc:'Champ manquant → bloqué sur missing_fields',
+    input:{inv:makeInvoice('validated',{...fullData,debtor_company_name:null}), invoices:[makeInvoice('validated')]},
+    expected:{blocked:true, reason:'missing_fields', errors:{debtor_company_name:'Champ requis'}},
+    fn:({inv,invoices})=>simulatePreExportCheck(JSON.parse(JSON.stringify(inv)),invoices)},
+  {desc:'Tous valides, 1 ignorée → bloqué sur skipped_warning',
+    input:{inv:makeInvoice('validated',fullData), invoices:[makeInvoice('validated',fullData), makeInvoice('skipped',fullData)]},
+    expected:{blocked:true, reason:'skipped_warning', skipped:['test.pdf']},
+    fn:({inv,invoices})=>simulatePreExportCheck(JSON.parse(JSON.stringify(inv)),invoices)},
+  {desc:'Champ manquant ET ignorées → bloqué sur missing_fields en priorité',
+    input:{inv:makeInvoice('validated',{...fullData,amount_ttc:null}), invoices:[makeInvoice('validated'), makeInvoice('skipped')]},
+    expected:{blocked:true, reason:'missing_fields', errors:{amount_ttc:'Champ requis'}},
+    fn:({inv,invoices})=>simulatePreExportCheck(JSON.parse(JSON.stringify(inv)),invoices)},
+]));
+
+html.push('<h2>Intégration — re-validation d\'une facture ignorée</h2>');
+html.push(runSuite('Workflow complet : ignorée → éditée → validée', [
+  {desc:'Statut passe à extracted après édition',
+    input:makeInvoice('skipped', fullData),
+    expected:'extracted',
+    fn:inv=>{ simulateOnFI(inv,'debtor_company_name','Nouveau nom'); return inv.status; }},
+  {desc:'checkFields réussit après édition complète',
+    input:makeInvoice('extracted', fullData),
+    expected:true,
+    fn:inv=>checkFields(JSON.parse(JSON.stringify(inv)))},
+  {desc:'Après validation réussie → statut validated',
+    input:makeInvoice('extracted', fullData),
+    expected:'validated',
+    fn:inv=>{ const c=JSON.parse(JSON.stringify(inv)); if(checkFields(c)) c.status='validated'; return c.status; }},
+  {desc:'Bouton correct après re-validation (toutes validées)',
+    input:{inv:makeInvoice('validated'), invoices:[makeInvoice('validated'),makeInvoice('validated')]},
+    expected:'Terminer et exporter ✓',
+    fn:({inv,invoices})=>getButtonLabel(inv,invoices)},
+  {desc:'Ancienne ignorée disparaît de la liste skipped après validation',
+    input:[makeInvoice('validated'), makeInvoice('validated')],
+    expected:[],
+    fn:invoices=>getSkippedInvoices(invoices)},
+]));
+
+const summary = `<div class="summary">
     <div><div class="sum-n" style="color:#085041;">${totalPass}</div><div class="sum-l">Tests passés</div></div>
     <div><div class="sum-n" style="color:${totalFail>0?'#c0392b':'#085041'};">${totalFail}</div><div class="sum-l">Tests échoués</div></div>
     <div><div class="sum-n">${totalPass+totalFail}</div><div class="sum-l">Total</div></div>
   </div>`;
+document.getElementById('root').innerHTML = summary + html.join('');
 </script>
 </body>
 </html>
