@@ -714,6 +714,102 @@ html.push(runSuite('Workflow complet : ignorée → éditée → validée', [
     fn:invoices=>getSkippedInvoices(invoices)},
 ]));
 
+/* ══ CSV & ZIP OUTPUT LOGIC ══ */
+function snName(s){return s.replace(/[\/\\:*?"<>|]/g,'').replace(/\s+/g,'_').slice(0,80);}
+
+function getPdfFilename(inv){
+  const num=inv.data['invoice_number'];
+  return (num&&String(num).trim())?snName(String(num))+'.pdf':snName(inv.file.name);
+}
+
+function buildCSVContent(invoices,fields){
+  const validated=invoices.filter(i=>i.status==='validated');
+  const header=fields.map(f=>`"${f.label}"`).join(',');
+  const rows=validated.map(inv=>fields.map(f=>{const v=inv.data[f.key]??'';return'"'+String(v).replace(/"/g,'""')+'"';}).join(','));
+  return [header,...rows].join('\n');
+}
+
+function getZipContents(invoices,fields){
+  const validated=invoices.filter(i=>i.status==='validated');
+  return{csvFilename:'factures.csv',csvContent:buildCSVContent(invoices,fields),pdfs:validated.map(inv=>({filename:getPdfFilename(inv),originalName:inv.file.name}))};
+}
+
+const FLDS=[
+  {label:'Nom du débiteur',key:'debtor_company_name',type:'text',required:true},
+  {label:'N° de facture',  key:'invoice_number',     type:'text',required:true},
+  {label:'Montant TTC',    key:'amount_ttc',          type:'number',required:true},
+];
+const mkInv=(status,data)=>({file:{name:'original.pdf'},status,data});
+
+html.push('<h2>Export CSV & ZIP — getPdfFilename</h2>');
+html.push(runSuite('Renommage PDF avec N° de facture',[
+  {desc:'N° facture standard → nom correct',
+    input:mkInv('validated',{invoice_number:'F-2024-001'}),expected:'F-2024-001.pdf',fn:getPdfFilename},
+  {desc:'N° facture avec espaces → underscores',
+    input:mkInv('validated',{invoice_number:'F 2024 001'}),expected:'F_2024_001.pdf',fn:getPdfFilename},
+  {desc:'N° facture avec caractères interdits → nettoyés',
+    input:mkInv('validated',{invoice_number:'F/2024\\001'}),expected:'F2024001.pdf',fn:getPdfFilename},
+  {desc:'N° facture null → nom fichier original',
+    input:mkInv('validated',{invoice_number:null}),expected:'original.pdf',fn:getPdfFilename},
+  {desc:'N° facture vide → nom fichier original',
+    input:mkInv('validated',{invoice_number:''}),expected:'original.pdf',fn:getPdfFilename},
+  {desc:'N° facture très long → tronqué à 80 chars',
+    input:mkInv('validated',{invoice_number:'F-'+'X'.repeat(100)}),
+    expected:snName('F-'+'X'.repeat(100))+'.pdf',fn:getPdfFilename},
+]));
+
+html.push('<h2>Export CSV — buildCSVContent</h2>');
+html.push(runSuite('Contenu du fichier CSV',[
+  {desc:'Aucune validée → seulement header',
+    input:{invoices:[mkInv('skipped',{debtor_company_name:'A',invoice_number:'F-001',amount_ttc:100})],fields:FLDS},
+    expected:'"Nom du débiteur","N° de facture","Montant TTC"',
+    fn:({invoices,fields})=>buildCSVContent(invoices,fields)},
+  {desc:'1 facture validée → header + 1 ligne',
+    input:{invoices:[mkInv('validated',{debtor_company_name:'ACME',invoice_number:'F-001',amount_ttc:1500})],fields:FLDS},
+    expected:'"Nom du débiteur","N° de facture","Montant TTC"\n"ACME","F-001","1500"',
+    fn:({invoices,fields})=>buildCSVContent(invoices,fields)},
+  {desc:'2 factures validées → header + 2 lignes',
+    input:{invoices:[mkInv('validated',{debtor_company_name:'ACME',invoice_number:'F-001',amount_ttc:1500}),mkInv('validated',{debtor_company_name:'SARL B',invoice_number:'F-002',amount_ttc:800})],fields:FLDS},
+    expected:'"Nom du débiteur","N° de facture","Montant TTC"\n"ACME","F-001","1500"\n"SARL B","F-002","800"',
+    fn:({invoices,fields})=>buildCSVContent(invoices,fields)},
+  {desc:'Facture ignorée exclue du CSV',
+    input:{invoices:[mkInv('validated',{debtor_company_name:'ACME',invoice_number:'F-001',amount_ttc:1500}),mkInv('skipped',{debtor_company_name:'SKIP',invoice_number:'F-002',amount_ttc:0})],fields:FLDS},
+    expected:'"Nom du débiteur","N° de facture","Montant TTC"\n"ACME","F-001","1500"',
+    fn:({invoices,fields})=>buildCSVContent(invoices,fields)},
+  {desc:'Guillemets dans valeur → échappés',
+    input:{invoices:[mkInv('validated',{debtor_company_name:'ACME "Corp"',invoice_number:'F-001',amount_ttc:0})],fields:FLDS},
+    expected:'"Nom du débiteur","N° de facture","Montant TTC"\n"ACME ""Corp""","F-001","0"',
+    fn:({invoices,fields})=>buildCSVContent(invoices,fields)},
+  {desc:'Valeur null → cellule vide',
+    input:{invoices:[mkInv('validated',{debtor_company_name:null,invoice_number:'F-001',amount_ttc:null})],fields:FLDS},
+    expected:'"Nom du débiteur","N° de facture","Montant TTC"\n"","F-001",""',
+    fn:({invoices,fields})=>buildCSVContent(invoices,fields)},
+]));
+
+html.push('<h2>Export ZIP — getZipContents</h2>');
+html.push(runSuite('Contenu du ZIP',[
+  {desc:'Nom CSV toujours factures.csv',
+    input:{invoices:[mkInv('validated',{invoice_number:'F-001'})],fields:FLDS},
+    expected:'factures.csv',
+    fn:({invoices,fields})=>getZipContents(invoices,fields).csvFilename},
+  {desc:'1 PDF validé → 1 entrée dans le ZIP',
+    input:{invoices:[mkInv('validated',{invoice_number:'F-001'})],fields:FLDS},
+    expected:[{filename:'F-001.pdf',originalName:'original.pdf'}],
+    fn:({invoices,fields})=>getZipContents(invoices,fields).pdfs},
+  {desc:'2 PDFs validés → 2 entrées dans le ZIP',
+    input:{invoices:[mkInv('validated',{invoice_number:'F-001'}),mkInv('validated',{invoice_number:'F-002'})],fields:FLDS},
+    expected:[{filename:'F-001.pdf',originalName:'original.pdf'},{filename:'F-002.pdf',originalName:'original.pdf'}],
+    fn:({invoices,fields})=>getZipContents(invoices,fields).pdfs},
+  {desc:'Facture ignorée exclue du ZIP',
+    input:{invoices:[mkInv('validated',{invoice_number:'F-001'}),mkInv('skipped',{invoice_number:'F-002'})],fields:FLDS},
+    expected:[{filename:'F-001.pdf',originalName:'original.pdf'}],
+    fn:({invoices,fields})=>getZipContents(invoices,fields).pdfs},
+  {desc:'CSV dans le ZIP contient les bonnes données',
+    input:{invoices:[mkInv('validated',{debtor_company_name:'ACME',invoice_number:'F-001',amount_ttc:1500})],fields:FLDS},
+    expected:'"Nom du débiteur","N° de facture","Montant TTC"\n"ACME","F-001","1500"',
+    fn:({invoices,fields})=>getZipContents(invoices,fields).csvContent},
+]));
+
 const summary = `<div class="summary">
     <div><div class="sum-n" style="color:#085041;">${totalPass}</div><div class="sum-l">Tests passés</div></div>
     <div><div class="sum-n" style="color:${totalFail>0?'#c0392b':'#085041'};">${totalFail}</div><div class="sum-l">Tests échoués</div></div>

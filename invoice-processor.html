@@ -783,19 +783,21 @@ function showExport(){
 }
 function hideExport(){document.getElementById('screen-export').classList.remove('show');}
 
+function snName(s){return s.replace(/[\/\\:*?"<>|]/g,'').replace(/\s+/g,'_').slice(0,80);}
+function getPdfFilename(inv){const num=inv.data['invoice_number'];return(num&&String(num).trim())?snName(String(num))+'.pdf':snName(inv.file.name);}
 function buildCSV(){
-  const h=['fichier_original','fichier_renomme',...S.fields.map(f=>f.key)];
-  const rows=S.invoices.filter(i=>i.status==='validated').map(inv=>[inv.file.name,mkFname(inv),...S.fields.map(f=>'"'+String(inv.data[f.key]??'').replace(/"/g,'""')+'"')].join(','));
-  return [h.join(','),...rows].join('\n');
+  const validated=S.invoices.filter(i=>i.status==='validated');
+  const header=S.fields.map(f=>`"${f.label}"`).join(',');
+  const rows=validated.map(inv=>S.fields.map(f=>{const v=inv.data[f.key]??'';return'"'+String(v).replace(/"/g,'""')+'"';}).join(','));
+  return [header,...rows].join('\n');
 }
 function exportCSV(){dlBlob(new Blob(['\uFEFF'+buildCSV()],{type:'text/csv;charset=utf-8;'}),'factures.csv');}
 async function exportZIP(){
-  const z=new JSZip();z.file('factures.csv','\uFEFF'+buildCSV());
-  for(const inv of S.invoices.filter(i=>i.status==='validated')) z.file(mkFname(inv),await inv.file.arrayBuffer());
+  const z=new JSZip();
+  z.file('factures.csv','\uFEFF'+buildCSV());
+  for(const inv of S.invoices.filter(i=>i.status==='validated')) z.file(getPdfFilename(inv),await inv.file.arrayBuffer());
   dlBlob(await z.generateAsync({type:'blob'}),'factures_export.zip');
 }
-function mkFname(inv){if(!S.nomenclature.length)return inv.file.name;return S.nomenclature.map(k=>{const v=inv.data[k];return v?snName(String(v)):'inconnu';}).join(S.nomSep)+'.pdf';}
-function snName(s){return s.replace(/[\/\\:*?"<>|]/g,'').replace(/\s+/g,'_').slice(0,80);}
 function dlBlob(b,n){const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=n;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
 function restart(){S.files=[];S.invoices=[];S.cur=-1;S.busy=false;hideExport();document.getElementById('screen-main').classList.remove('in');document.getElementById('screen-upload').style.display='';setTimeout(()=>document.getElementById('screen-upload').classList.remove('out'),10);}
 
