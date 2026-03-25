@@ -91,6 +91,43 @@ function parseJSON(raw) {
   }
 }
 
+function vandn(value, f) {
+  const errs=[], empty=value==null||String(value).trim()==='';
+  if (f.required&&empty) return {valid:false,norm:value,errs:['Champ requis']};
+  if (empty) return {valid:true,norm:value,errs:[]};
+  let norm=value;
+  if (f.type==='date') {
+    norm=normalizeDate(value);
+    if (!norm) errs.push(`Date non reconnue : "${value}"`);
+    else { const d=new Date(norm); if(isNaN(d.getTime())) errs.push('Date invalide'); if(d.getFullYear()<2000||d.getFullYear()>2099) errs.push('Année hors plage'); }
+  }
+  if (f.type==='number') {
+    norm=normalizeAmount(value);
+    if (norm==null) errs.push(`Montant non reconnu : "${value}"`);
+    else { if(norm<0) errs.push('Montant négatif'); if(norm>10_000_000) errs.push('Montant > 10M€'); }
+  }
+  if (f.type==='text'&&String(value).length>500) errs.push('Valeur trop longue');
+  return {valid:errs.length===0,norm:norm??value,errs};
+}
+
+function simulateValidation(invoiceData, fields) {
+  const errors={};let ok=true;
+  fields.forEach(f=>{
+    const v=invoiceData[f.key],res=vandn(v,f);
+    if(!res.valid){errors[f.key]=res.errs[0];ok=false;}
+  });
+  return {ok, errors};
+}
+
+function allDone(invoices) {
+  return invoices.length>0&&invoices.every(x=>x.status==='validated'||x.status==='skipped');
+}
+
+function isFieldEmpty(inv, key) {
+  const raw=inv.data[key];
+  return inv.status!=='pending'&&(raw==null||String(raw).trim()==='');
+}
+
 /* ══ TEST ENGINE ══ */
 
 let totalPass=0, totalFail=0;
@@ -217,6 +254,151 @@ html.push(runSuite('Formats code postal', [
   {desc:'Code postal US (ZIP)',               input:'10001',    expected:'10001',    fn:v=>String(v)},
   {desc:'Code postal BE',                     input:'1000',     expected:'1000',     fn:v=>String(v)},
   {desc:'Code postal CH',                     input:'1200',     expected:'1200',     fn:v=>String(v)},
+]));
+
+/* ══ FIELD DEFINITIONS (same as app) ══ */
+const FIELDS = [
+  {label:'Nom du débiteur',    key:'debtor_company_name',          type:'text',   required:true},
+  {label:'Adresse',            key:'debtor_post_street_1',         type:'text',   required:true},
+  {label:'Code postal',        key:'debtor_post_postalcode',       type:'text',   required:true},
+  {label:'Ville',              key:'debtor_post_city',             type:'text',   required:true},
+  {label:'Pays',               key:'debtor_post_country_code',     type:'text',   required:true},
+  {label:'N° de facture',      key:'invoice_number',               type:'text',   required:true},
+  {label:'Date émission',      key:'invoice_date',                 type:'date',   required:true},
+  {label:'Échéance',           key:'invoice_due_date',             type:'date',   required:true},
+  {label:'Montant TTC',        key:'amount_ttc',                   type:'number', required:true},
+  {label:'Montant total',      key:'invoice_total_amount_inc_vat', type:'number', required:true},
+  {label:'Montant en suspens', key:'invoice_open_amount_inc_vat',  type:'number', required:true},
+];
+
+html.push('<h2>vandn — Validation de chaque champ obligatoire</h2>');
+html.push(runSuite('Champs requis manquants', [
+  {desc:'Nom débiteur manquant → invalide',   input:{key:'debtor_company_name',type:'text',required:true},  expected:{valid:false,err:'Champ requis'}, fn:f=>{ const r=vandn(null,f); return {valid:r.valid,err:r.errs[0]}; }},
+  {desc:'Adresse manquante → invalide',       input:{key:'debtor_post_street_1',type:'text',required:true}, expected:{valid:false,err:'Champ requis'}, fn:f=>{ const r=vandn('',f);   return {valid:r.valid,err:r.errs[0]}; }},
+  {desc:'Code postal manquant → invalide',    input:{key:'debtor_post_postalcode',type:'text',required:true},expected:{valid:false,err:'Champ requis'}, fn:f=>{ const r=vandn(null,f); return {valid:r.valid,err:r.errs[0]}; }},
+  {desc:'Ville manquante → invalide',         input:{key:'debtor_post_city',type:'text',required:true},     expected:{valid:false,err:'Champ requis'}, fn:f=>{ const r=vandn('',f);   return {valid:r.valid,err:r.errs[0]}; }},
+  {desc:'Pays manquant → invalide',           input:{key:'debtor_post_country_code',type:'text',required:true},expected:{valid:false,err:'Champ requis'},fn:f=>{ const r=vandn(null,f); return {valid:r.valid,err:r.errs[0]}; }},
+  {desc:'N° facture manquant → invalide',     input:{key:'invoice_number',type:'text',required:true},       expected:{valid:false,err:'Champ requis'}, fn:f=>{ const r=vandn(null,f); return {valid:r.valid,err:r.errs[0]}; }},
+  {desc:'Date émission manquante → invalide', input:{key:'invoice_date',type:'date',required:true},         expected:{valid:false,err:'Champ requis'}, fn:f=>{ const r=vandn('',f);   return {valid:r.valid,err:r.errs[0]}; }},
+  {desc:'Échéance manquante → invalide',      input:{key:'invoice_due_date',type:'date',required:true},     expected:{valid:false,err:'Champ requis'}, fn:f=>{ const r=vandn(null,f); return {valid:r.valid,err:r.errs[0]}; }},
+  {desc:'Montant TTC manquant → invalide',    input:{key:'amount_ttc',type:'number',required:true},         expected:{valid:false,err:'Champ requis'}, fn:f=>{ const r=vandn(null,f); return {valid:r.valid,err:r.errs[0]}; }},
+  {desc:'Montant total manquant → invalide',  input:{key:'invoice_total_amount_inc_vat',type:'number',required:true},expected:{valid:false,err:'Champ requis'},fn:f=>{ const r=vandn('',f); return {valid:r.valid,err:r.errs[0]}; }},
+  {desc:'Montant suspens manquant → invalide',input:{key:'invoice_open_amount_inc_vat',type:'number',required:true},expected:{valid:false,err:'Champ requis'},fn:f=>{ const r=vandn(null,f); return {valid:r.valid,err:r.errs[0]}; }},
+]));
+
+html.push(runSuite('Champs remplis valides', [
+  {desc:'Nom débiteur valide',    input:{v:'ACME SAS',        f:{type:'text',  required:true}}, expected:{valid:true}, fn:({v,f})=>{ const r=vandn(v,f); return {valid:r.valid}; }},
+  {desc:'Adresse valide',         input:{v:'12 rue de la Paix',f:{type:'text', required:true}}, expected:{valid:true}, fn:({v,f})=>{ const r=vandn(v,f); return {valid:r.valid}; }},
+  {desc:'Code postal FR valide',  input:{v:'75001',           f:{type:'text',  required:true}}, expected:{valid:true}, fn:({v,f})=>{ const r=vandn(v,f); return {valid:r.valid}; }},
+  {desc:'Ville valide',           input:{v:'Paris',           f:{type:'text',  required:true}}, expected:{valid:true}, fn:({v,f})=>{ const r=vandn(v,f); return {valid:r.valid}; }},
+  {desc:'Pays valide',            input:{v:'FR',              f:{type:'text',  required:true}}, expected:{valid:true}, fn:({v,f})=>{ const r=vandn(v,f); return {valid:r.valid}; }},
+  {desc:'N° facture valide',      input:{v:'F-2024-001',      f:{type:'text',  required:true}}, expected:{valid:true}, fn:({v,f})=>{ const r=vandn(v,f); return {valid:r.valid}; }},
+  {desc:'Date émission valide',   input:{v:'15/03/2024',      f:{type:'date',  required:true}}, expected:{valid:true}, fn:({v,f})=>{ const r=vandn(v,f); return {valid:r.valid}; }},
+  {desc:'Échéance valide',        input:{v:'2024-04-15',      f:{type:'date',  required:true}}, expected:{valid:true}, fn:({v,f})=>{ const r=vandn(v,f); return {valid:r.valid}; }},
+  {desc:'Montant TTC valide',     input:{v:'1 500,50 €',      f:{type:'number',required:true}}, expected:{valid:true}, fn:({v,f})=>{ const r=vandn(v,f); return {valid:r.valid}; }},
+  {desc:'Montant total valide',   input:{v:'1500.50',         f:{type:'number',required:true}}, expected:{valid:true}, fn:({v,f})=>{ const r=vandn(v,f); return {valid:r.valid}; }},
+  {desc:'Montant suspens valide', input:{v:'250,00',          f:{type:'number',required:true}}, expected:{valid:true}, fn:({v,f})=>{ const r=vandn(v,f); return {valid:r.valid}; }},
+]));
+
+html.push(runSuite('Erreurs de format', [
+  {desc:'Date invalide → erreur',          input:{v:'pas-une-date',f:{type:'date',  required:true}}, expected:{valid:false}, fn:({v,f})=>{ const r=vandn(v,f); return {valid:r.valid}; }},
+  {desc:'Montant invalide → erreur',       input:{v:'abc',         f:{type:'number',required:true}}, expected:{valid:false}, fn:({v,f})=>{ const r=vandn(v,f); return {valid:r.valid}; }},
+  {desc:'Montant négatif → erreur',        input:{v:'-100',        f:{type:'number',required:true}}, expected:{valid:false}, fn:({v,f})=>{ const r=vandn(v,f); return {valid:r.valid}; }},
+  {desc:'Année hors plage → erreur',       input:{v:'15/03/1985',  f:{type:'date',  required:true}}, expected:{valid:false}, fn:({v,f})=>{ const r=vandn(v,f); return {valid:r.valid}; }},
+  {desc:'Texte trop long → erreur',        input:{v:'x'.repeat(501),f:{type:'text', required:true}}, expected:{valid:false}, fn:({v,f})=>{ const r=vandn(v,f); return {valid:r.valid}; }},
+]));
+
+html.push('<h2>Validation complète d\'une facture — simulateValidation</h2>');
+const fullValid = {
+  debtor_company_name:'ACME SAS', debtor_post_street_1:'12 rue de la Paix',
+  debtor_post_postalcode:'75001', debtor_post_city:'Paris', debtor_post_country_code:'FR',
+  invoice_number:'F-2024-001', invoice_date:'2024-03-15', invoice_due_date:'2024-04-15',
+  amount_ttc:'1500.50', invoice_total_amount_inc_vat:'1500.50', invoice_open_amount_inc_vat:'250.00'
+};
+html.push(runSuite('Scénarios de validation', [
+  {desc:'Facture complète et valide → ok',
+    input:fullValid, expected:{ok:true,errors:{}},
+    fn:data=>simulateValidation(data,FIELDS)},
+  {desc:'Nom manquant → erreur sur debtor_company_name',
+    input:{...fullValid,debtor_company_name:null},
+    expected:{ok:false,errors:{debtor_company_name:'Champ requis'}},
+    fn:data=>simulateValidation(data,FIELDS)},
+  {desc:'Date invalide → erreur sur invoice_date',
+    input:{...fullValid,invoice_date:'not-a-date'},
+    expected:{ok:false,errors:{invoice_date:'Date non reconnue : "not-a-date"'}},
+    fn:data=>simulateValidation(data,FIELDS)},
+  {desc:'Montant invalide → erreur sur amount_ttc',
+    input:{...fullValid,amount_ttc:'abc'},
+    expected:{ok:false,errors:{amount_ttc:'Montant non reconnu : "abc"'}},
+    fn:data=>simulateValidation(data,FIELDS)},
+  {desc:'Plusieurs champs manquants → plusieurs erreurs',
+    input:{...fullValid,debtor_company_name:null,invoice_date:'',amount_ttc:null},
+    expected:{ok:false,errors:{debtor_company_name:'Champ requis',invoice_date:'Champ requis',amount_ttc:'Champ requis'}},
+    fn:data=>simulateValidation(data,FIELDS)},
+]));
+
+html.push('<h2>Logique "Terminer et exporter" — allDone</h2>');
+html.push(runSuite('Détection fin de traitement', [
+  {desc:'Aucune facture → pas fini',
+    input:[],
+    expected:false,
+    fn:allDone},
+  {desc:'1 facture pending → pas fini',
+    input:[{status:'pending'}],
+    expected:false,
+    fn:allDone},
+  {desc:'1 facture extracted → pas fini',
+    input:[{status:'extracted'}],
+    expected:false,
+    fn:allDone},
+  {desc:'1 facture validated → fini',
+    input:[{status:'validated'}],
+    expected:true,
+    fn:allDone},
+  {desc:'1 validated + 1 skipped → fini',
+    input:[{status:'validated'},{status:'skipped'}],
+    expected:true,
+    fn:allDone},
+  {desc:'2 validated + 1 pending → pas fini',
+    input:[{status:'validated'},{status:'validated'},{status:'pending'}],
+    expected:false,
+    fn:allDone},
+  {desc:'2 validated + 1 extracted → pas fini',
+    input:[{status:'validated'},{status:'validated'},{status:'extracted'}],
+    expected:false,
+    fn:allDone},
+  {desc:'3 validated → fini',
+    input:[{status:'validated'},{status:'validated'},{status:'validated'}],
+    expected:true,
+    fn:allDone},
+]));
+
+html.push('<h2>Détection champ vide — mise en orange</h2>');
+html.push(runSuite('isFieldEmpty (highlight orange)', [
+  {desc:'Facture pending, champ null → pas orange (pas encore extrait)',
+    input:{inv:{status:'pending',data:{debtor_company_name:null}},key:'debtor_company_name'},
+    expected:false,
+    fn:({inv,key})=>isFieldEmpty(inv,key)},
+  {desc:'Facture extracted, champ null → orange',
+    input:{inv:{status:'extracted',data:{debtor_company_name:null}},key:'debtor_company_name'},
+    expected:true,
+    fn:({inv,key})=>isFieldEmpty(inv,key)},
+  {desc:'Facture extracted, champ vide → orange',
+    input:{inv:{status:'extracted',data:{debtor_company_name:''}},key:'debtor_company_name'},
+    expected:true,
+    fn:({inv,key})=>isFieldEmpty(inv,key)},
+  {desc:'Facture extracted, champ rempli → pas orange',
+    input:{inv:{status:'extracted',data:{debtor_company_name:'ACME'}},key:'debtor_company_name'},
+    expected:false,
+    fn:({inv,key})=>isFieldEmpty(inv,key)},
+  {desc:'Facture validated, champ null → orange',
+    input:{inv:{status:'validated',data:{invoice_date:null}},key:'invoice_date'},
+    expected:true,
+    fn:({inv,key})=>isFieldEmpty(inv,key)},
+  {desc:'Facture validated, champ rempli → pas orange',
+    input:{inv:{status:'validated',data:{amount_ttc:1500.50}},key:'amount_ttc'},
+    expected:false,
+    fn:({inv,key})=>isFieldEmpty(inv,key)},
 ]));
 
 document.getElementById('root').innerHTML = html.join('') +

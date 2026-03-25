@@ -64,6 +64,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .inv-item{display:flex;align-items:center;gap:7px;padding:7px 8px;border-radius:var(--r);cursor:pointer;margin-bottom:2px;transition:background .1s;}
 .inv-item:hover{background:var(--bg3);}
 .inv-item.active{background:var(--bg);box-shadow:0 0 0 .5px var(--bd2);}
+.inv-item.inv-validated{background:var(--teal-bg);}
+.inv-item.inv-validated:hover{background:#cceee3;}
+.inv-item.inv-validated.active{background:#b8e8d8;box-shadow:0 0 0 .5px var(--teal);}
+.inv-check{font-size:11px;color:var(--teal);flex-shrink:0;}
 .inv-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
 .s-pending{background:var(--text3);}
 .s-extracting{background:var(--amber);animation:pulse .8s infinite;}
@@ -265,7 +269,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
           <div class="footer-actions">
             <button class="btn btn-ghost btn-sm" onclick="skipInvoice()">Ignorer</button>
             <button class="btn btn-ghost btn-sm" onclick="reExtract()">Ré-extraire</button>
-            <button class="btn btn-p btn-sm" style="flex:1;" onclick="validateInvoice()">Valider ✓</button>
+            <button class="btn btn-p btn-sm" style="flex:1;" id="btnValidate" onclick="validateInvoice()">Valider ✓</button>
           </div>
         </div>
       </div>
@@ -483,9 +487,11 @@ function renderSidebar() {
   document.getElementById('sbCount').textContent=`(${S.invoices.length})`;
   S.invoices.forEach((inv,i)=>{
     const el=document.createElement('div');
-    el.className='inv-item'+(i===S.cur?' active':'');
+    const isVal=inv.status==='validated';
+    el.className='inv-item'+(i===S.cur?' active':'')+(isVal?' inv-validated':'');
     const conf=inv.confidence!==null?`<span class="inv-conf">${inv.confidence}%</span>`:'';
-    el.innerHTML=`<div class="inv-dot s-${inv.status}"></div><span class="inv-name" title="${esc(inv.file.name)}">${esc(shortName(inv.file.name))}</span>${conf}<button class="inv-remove" onclick="event.stopPropagation();confirmRemove(${i})" title="Écarter cette facture">✕</button>`;
+    const check=isVal?`<span class="inv-check">✓</span>`:'';
+    el.innerHTML=`<div class="inv-dot s-${inv.status}"></div><span class="inv-name" title="${esc(inv.file.name)}">${esc(shortName(inv.file.name))}</span>${conf}${check}<button class="inv-remove" onclick="event.stopPropagation();confirmRemove(${i})" title="Écarter cette facture">✕</button>`;
     el.onclick=()=>selectInv(i);
     l.appendChild(el);
   });
@@ -504,6 +510,9 @@ function selectInv(i) {
   document.getElementById('fieldsFooter').style.display='';
   renderFieldsUI(inv);
   renderBadges(inv);
+  const allDone=S.invoices.length>0&&S.invoices.every(x=>x.status==='validated'||x.status==='skipped');
+  const btn=document.getElementById('btnValidate');
+  if(btn){if(allDone){btn.textContent='Terminer et exporter ✓';btn.onclick=showExport;}else{btn.textContent='Valider ✓';btn.onclick=validateInvoice;}}
 }
 
 /* ══ PDF PREVIEW ═════════════════════════════════════ */
@@ -536,13 +545,13 @@ function renderFieldsUI(inv) {
     const row=document.createElement('div');row.className='field-row';
     row.innerHTML=`
       <div class="field-lbl">${esc(f.label)}${f.required?'<span class="req">*</span>':''}</div>
-      <input class="field-input${err?' err':isEmpty?' empty':wasNorm?' normd':''}"
+      <input class="field-input${err?' empty':isEmpty?' empty':wasNorm?' normd':''}"
         type="${f.type==='number'?'number':f.type==='date'?'date':'text'}"
         id="fi_${f.key}" value="${esc(val)}"
         placeholder="${f.required?'Requis':'Optionnel'}"
         oninput="onFI('${f.key}',this.value)"
       />
-      ${err?`<div class="field-err">${esc(err)}</div>`:''}
+      ${err?`<div class="field-err" style="color:var(--amber-text);">${esc(err)}</div>`:''}
       ${wasNorm&&!err?'<div class="field-hint">Normalisée automatiquement</div>':''}
     `;
     c.appendChild(row);
@@ -658,6 +667,12 @@ function validateInvoice(){
   });
   if(!ok){selectInv(S.cur);return;}
   inv.status='validated';renderSidebar();renderBadges(inv);updateBar();
+  const allDone=S.invoices.length>0&&S.invoices.every(x=>x.status==='validated'||x.status==='skipped');
+  if(allDone){
+    const btn=document.getElementById('btnValidate');
+    if(btn){btn.textContent='Terminer et exporter ✓';btn.onclick=showExport;}
+    return;
+  }
   const next=S.invoices.findIndex((x,i)=>i>S.cur&&(x.status==='extracted'||x.status==='error'));
   if(next>=0) setTimeout(()=>selectInv(next),140);
 }
