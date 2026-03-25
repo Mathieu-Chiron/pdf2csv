@@ -401,6 +401,53 @@ html.push(runSuite('isFieldEmpty (highlight orange)', [
     fn:({inv,key})=>isFieldEmpty(inv,key)},
 ]));
 
+/* ══ DUPLICATE DETECTION LOGIC (same as app) ══ */
+function detectDuplicates(existingNames, newNames) {
+  const duplicates=[];
+  const added=[];
+  newNames.forEach(name=>{
+    if(existingNames.includes(name)||added.includes(name)) duplicates.push(name);
+    else added.push(name);
+  });
+  return {duplicates, added};
+}
+
+html.push('<h2>Unicité des factures — detectDuplicates</h2>');
+html.push(runSuite('Détection des doublons', [
+  {desc:'Aucun doublon — tous ajoutés',
+    input:{existing:[], new:['facture-A.pdf','facture-B.pdf']},
+    expected:{duplicates:[],added:['facture-A.pdf','facture-B.pdf']},
+    fn:({existing,new:n})=>detectDuplicates(existing,n)},
+  {desc:'Un doublon détecté',
+    input:{existing:['facture-A.pdf'], new:['facture-A.pdf']},
+    expected:{duplicates:['facture-A.pdf'],added:[]},
+    fn:({existing,new:n})=>detectDuplicates(existing,n)},
+  {desc:'Doublon parmi plusieurs fichiers',
+    input:{existing:['facture-A.pdf'], new:['facture-A.pdf','facture-B.pdf']},
+    expected:{duplicates:['facture-A.pdf'],added:['facture-B.pdf']},
+    fn:({existing,new:n})=>detectDuplicates(existing,n)},
+  {desc:'Deux doublons détectés',
+    input:{existing:['facture-A.pdf','facture-B.pdf'], new:['facture-A.pdf','facture-B.pdf']},
+    expected:{duplicates:['facture-A.pdf','facture-B.pdf'],added:[]},
+    fn:({existing,new:n})=>detectDuplicates(existing,n)},
+  {desc:'Fichier ajouté deux fois dans le même lot',
+    input:{existing:[], new:['facture-A.pdf','facture-A.pdf']},
+    expected:{duplicates:['facture-A.pdf'],added:['facture-A.pdf']},
+    fn:({existing,new:n})=>detectDuplicates(existing,n)},
+  {desc:'Noms différents — aucun doublon',
+    input:{existing:['facture-A.pdf'], new:['facture-B.pdf','facture-C.pdf']},
+    expected:{duplicates:[],added:['facture-B.pdf','facture-C.pdf']},
+    fn:({existing,new:n})=>detectDuplicates(existing,n)},
+  {desc:'Sensibilité à la casse — noms différents',
+    input:{existing:['Facture-A.pdf'], new:['facture-a.pdf']},
+    expected:{duplicates:[],added:['facture-a.pdf']},
+    fn:({existing,new:n})=>detectDuplicates(existing,n)},
+  {desc:'Liste vide ajoutée — rien ne change',
+    input:{existing:['facture-A.pdf'], new:[]},
+    expected:{duplicates:[],added:[]},
+    fn:({existing,new:n})=>detectDuplicates(existing,n)},
+]));
+
 document.getElementById('root').innerHTML = html.join('') +
   `<div class="summary">
     <div><div class="sum-n" style="color:#085041;">${totalPass}</div><div class="sum-l">Tests passés</div></div>
