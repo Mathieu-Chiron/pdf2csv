@@ -113,6 +113,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .field-input.empty{border-color:var(--amber);background:var(--amber-bg);}
 .field-err{font-size:11px;color:var(--red);margin-top:3px;}
 .field-hint{font-size:11px;color:var(--teal-text);margin-top:3px;}
+.debtor-code-row{margin-bottom:14px;}
+.debtor-code-val{font-family:monospace;font-size:13px;font-weight:600;letter-spacing:.06em;background:var(--bg3);border:.5px solid var(--bd2);border-radius:6px;padding:7px 10px;color:var(--text);user-select:all;cursor:default;}
+.debtor-code-hint{font-size:11px;color:var(--text3);margin-top:3px;}
 .vat-section{margin-top:14px;padding-top:14px;border-top:.5px solid var(--bd);}
 .vat-section-title{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px;}
 .vat-switch-btn{font-size:12px;color:var(--teal);cursor:pointer;background:none;border:1px solid var(--teal);border-radius:4px;padding:3px 10px;margin:4px 0;display:block;}
@@ -491,6 +494,12 @@ function resolveVATAssignment(creditorVAT,debtorVAT){const c=creditorVAT?normali
 function switchVATValues(data){const tmp=data.creditor_vat_number;data.creditor_vat_number=data.debtor_vat_number;data.debtor_vat_number=tmp;return data;}
 function hasDuplicateVAT(c,d){if(!c||!d)return false;const nc=normalizeVAT(c),nd=normalizeVAT(d);return !!(nc&&nd&&nc===nd);}
 
+/* ══ DEBTOR CODE ══════════════════════════════════════ */
+const DEBTOR_CODE_SOURCES=['debtor_company_name','debtor_post_city','debtor_post_street_1','debtor_post_postalcode'];
+function extractCode(str,n=3){if(!str)return 'X'.repeat(n);const s=String(str).toUpperCase().replace(/[^A-Z0-9]/g,'');return(s.slice(0,n)||'').padEnd(n,'X');}
+function generateDebtorCode(data){return DEBTOR_CODE_SOURCES.map(k=>extractCode(data[k],3)).join('');}
+function computeDebtorCode(data){const vatState=resolveVATAssignment(data.creditor_vat_number,data.debtor_vat_number);if(vatState==='both'||vatState==='debtor_only')return normalizeVAT(data.debtor_vat_number);return generateDebtorCode(data);}
+
 /* ══ STATE ══════════════════════════════════════════ */
 const S = {
   fields:[
@@ -597,8 +606,19 @@ async function renderPDF(file) {
 }
 
 /* ══ FIELDS UI ════════════════════════════════════════ */
+function renderDebtorCode(inv){
+  const code=computeDebtorCode(inv.data);
+  inv.data.debtor_code=code;
+  const el=document.getElementById('debtorCodeVal');
+  if(el) el.textContent=code||'—';
+}
+
 function renderFieldsUI(inv) {
   const c=document.getElementById('fieldsContent');c.innerHTML='';
+  const codeRow=document.createElement('div');codeRow.className='debtor-code-row';
+  const code=computeDebtorCode(inv.data);inv.data.debtor_code=code;
+  codeRow.innerHTML=`<div class="field-lbl">Code débiteur</div><div class="debtor-code-val" id="debtorCodeVal">${esc(code||'—')}</div><div class="debtor-code-hint">Calculé automatiquement — non modifiable</div>`;
+  c.appendChild(codeRow);
   S.fields.forEach(f=>{
     const raw=inv.data[f.key],val=raw!=null?String(raw):'';
     const err=inv.errors?.[f.key],wasNorm=inv.rawNorm?.[f.key]===true;
@@ -697,6 +717,7 @@ function onFI(key,val){
   if(S.cur===-1) return;
   const inv=S.invoices[S.cur];
   inv.data[key]=val;
+  if([...DEBTOR_CODE_SOURCES,'creditor_vat_number','debtor_vat_number'].includes(key)) renderDebtorCode(inv);
   if(inv.errors) delete inv.errors[key];
   if(inv.status==='skipped'||inv.status==='validated') {
     inv.status='extracted';
@@ -796,6 +817,7 @@ JSON uniquement.`;
     });
     if(!norm['debtor_post_country_code']) norm['debtor_post_country_code']='France';
     VAT_FIELDS.forEach(f=>{const raw=parsed.data[f.key];norm[f.key]=(raw&&raw!=='null')?normalizeVAT(raw):null;});
+    norm.debtor_code=computeDebtorCode(norm);
     inv.data=norm;inv.rawNorm=rawNorm;inv.repaired=parsed.repaired||false;
     inv.confidence=confidence(norm,S.fields);inv.status='extracted';inv.errors={};
   } catch(e){inv.status='error';inv.error=e.message;inv.data={};inv.confidence=0;}
@@ -868,7 +890,7 @@ function showExport(){
     <div class="exp-stat"><div class="exp-stat-n" style="color:var(--teal-text);">${val.length}</div><div class="exp-stat-l">Validées</div></div>
     <div class="exp-stat"><div class="exp-stat-n" style="color:var(--amber-text);">${skip.length}</div><div class="exp-stat-l">Ignorées</div></div>`;
   const activeVAT=VAT_FIELDS.filter(f=>S.invoices.some(inv=>inv.data[f.key]));
-  const exportFields=[...S.fields,...activeVAT];
+  const exportFields=[...S.fields,...activeVAT,{key:'debtor_code',label:'Code débiteur'}];
   const thead=document.querySelector('#expTable thead'),tbody=document.querySelector('#expTable tbody');
   thead.innerHTML='<tr>'+['Fichier',...exportFields.map(f=>f.label),'Statut'].map(h=>`<th>${esc(h)}</th>`).join('')+'</tr>';
   tbody.innerHTML='';
@@ -889,7 +911,7 @@ function getPdfFilename(inv){const num=inv.data['invoice_number'];return(num&&St
 function buildCSV(){
   const validated=S.invoices.filter(i=>i.status==='validated');
   const activeVAT=VAT_FIELDS.filter(f=>S.invoices.some(inv=>inv.data[f.key]));
-  const exportFields=[...S.fields,...activeVAT];
+  const exportFields=[...S.fields,...activeVAT,{key:'debtor_code',label:'Code débiteur'}];
   const header=exportFields.map(f=>`"${f.label}"`).join(',');
   const rows=validated.map(inv=>exportFields.map(f=>{const v=inv.data[f.key]??'';return'"'+String(v).replace(/"/g,'""')+'"';}).join(','));
   return [header,...rows].join('\n');

@@ -169,6 +169,25 @@ function getActiveVATFields(invoices,vatFields){
   return vatFields.filter(f=>invoices.some(inv=>inv.data&&inv.data[f.key]));
 }
 
+/* ══ DEBTOR CODE ══════════════════════════════════════ */
+const DEBTOR_CODE_SOURCES=['debtor_company_name','debtor_post_city','debtor_post_street_1','debtor_post_postalcode'];
+
+function extractCode(str,n=3){
+  if(!str) return 'X'.repeat(n);
+  const s=String(str).toUpperCase().replace(/[^A-Z0-9]/g,'');
+  return (s.slice(0,n)||'').padEnd(n,'X');
+}
+
+function generateDebtorCode(data){
+  return DEBTOR_CODE_SOURCES.map(k=>extractCode(data[k],3)).join('');
+}
+
+function computeDebtorCode(data){
+  const vatState=resolveVATAssignment(data.creditor_vat_number,data.debtor_vat_number);
+  if(vatState==='both'||vatState==='debtor_only') return normalizeVAT(data.debtor_vat_number);
+  return generateDebtorCode(data);
+}
+
 /* ══ TEST ENGINE ══ */
 let pass=0, fail=0;
 function eq(a,b){return JSON.stringify(a)===JSON.stringify(b);}
@@ -453,6 +472,70 @@ suite('Risque: colonnes TVA dans l\'export CSV (getActiveVATFields)', ()=>{
   test('Aucune TVA → aucune colonne',           getActiveVATFields([invWithNone],vatFields).length,    0);
   test('Mix invoices → colonnes union',         getActiveVATFields([invWithOne,invWithNone],vatFields).length, 1);
   test('Mix avec les deux → deux colonnes',     getActiveVATFields([invWithBoth,invWithNone],vatFields).length, 2);
+});
+
+suite('extractCode', ()=>{
+  test('3 premières lettres',          extractCode('ACME SAS',3),        'ACM');
+  test('Chiffres acceptés',            extractCode('12 rue de la Paix',3),'12R');
+  test('Ville sans accent',            extractCode('Paris',3),           'PAR');
+  test('Code postal',                  extractCode('75001',3),           '750');
+  test('Moins de 3 chars → padX',      extractCode('AB',3),              'ABX');
+  test('Vide → XXX',                   extractCode('',3),                'XXX');
+  test('Null → XXX',                   extractCode(null,3),              'XXX');
+  test('Undefined → XXX',             extractCode(undefined,3),         'XXX');
+  test('Espaces seuls → XXX',          extractCode('   ',3),             'XXX');
+  test('Caractères spéciaux ignorés',  extractCode('!@#ABC',3),          'ABC');
+  test('Minuscules → majuscules',      extractCode('paris',3),           'PAR');
+  test('Accents supprimés',            extractCode('Évreux',3),          'VRE');
+  test('N=4 fonctionne',              extractCode('ACME SAS',4),         'ACME');
+});
+
+suite('generateDebtorCode', ()=>{
+  const d={debtor_company_name:'ACME SAS',debtor_post_city:'Paris',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001'};
+  test('Code complet',                 generateDebtorCode(d),            'ACMPAR12R750');
+  test('Longueur = 12',               generateDebtorCode(d).length,      12);
+  const d2={...d,debtor_company_name:'AB'};
+  test('Nom court → padX',            generateDebtorCode(d2),            'ABXPAR12R750');
+  const d3={...d,debtor_post_city:''};
+  test('Ville vide → XXX',            generateDebtorCode(d3),            'ACMXXX12R750');
+  const d4={debtor_company_name:null,debtor_post_city:null,debtor_post_street_1:null,debtor_post_postalcode:null};
+  test('Tout null → 12 X',            generateDebtorCode(d4),            'XXXXXXXXXXXX');
+  const d5={...d,debtor_post_street_1:'Rue du Général'};
+  test('Adresse sans numéro',         generateDebtorCode(d5),            'ACMPARRUE750');
+  const d6={...d,debtor_company_name:'Dupont & Fils'};
+  test('Esperluette ignorée',         generateDebtorCode(d6),            'DUPPAR12R750');
+});
+
+suite('computeDebtorCode — priorité TVA débiteur', ()=>{
+  const base={debtor_company_name:'ACME SAS',debtor_post_city:'Paris',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001'};
+  const withBoth={...base,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'};
+  const withDebtorOnly={...base,creditor_vat_number:null,debtor_vat_number:'DE123456789'};
+  const withCreditorOnly={...base,creditor_vat_number:'FR12345678901',debtor_vat_number:null};
+  const withNone={...base,creditor_vat_number:null,debtor_vat_number:null};
+
+  test('Deux TVA → TVA débiteur',      computeDebtorCode(withBoth),       'DE123456789');
+  test('TVA débiteur seul → TVA',      computeDebtorCode(withDebtorOnly), 'DE123456789');
+  test('TVA créancier seul → généré',  computeDebtorCode(withCreditorOnly),'ACMPAR12R750');
+  test('Aucune TVA → généré',          computeDebtorCode(withNone),       'ACMPAR12R750');
+  test('Code généré = 12 chars',       computeDebtorCode(withNone).length, 12);
+  test('TVA débiteur normalisée',      computeDebtorCode({...withDebtorOnly,debtor_vat_number:'de 123 456 789'}), 'DE123456789');
+});
+
+suite('computeDebtorCode — mise à jour auto sur changement de champ', ()=>{
+  const base={debtor_company_name:'ACME SAS',debtor_post_city:'Paris',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001',creditor_vat_number:null,debtor_vat_number:null};
+  const before=computeDebtorCode(base);
+  const after=computeDebtorCode({...base,debtor_company_name:'Nouveau Client'});
+  test('Changement nom → code change',    before!==after,  true);
+  test('Nouveau code reflète le nom',     after.slice(0,3), 'NOU');
+  const cityChange=computeDebtorCode({...base,debtor_post_city:'Lyon'});
+  test('Changement ville → code change',  cityChange.slice(3,6), 'LYO');
+  const streetChange=computeDebtorCode({...base,debtor_post_street_1:'5 avenue Foch'});
+  test('Changement adresse → code change',streetChange.slice(6,9),'5AV');
+  const postalChange=computeDebtorCode({...base,debtor_post_postalcode:'69001'});
+  test('Changement CP → code change',     postalChange.slice(9,12),'690');
+  // Ajout d'une TVA débiteur → bascule vers TVA
+  const vatAdded=computeDebtorCode({...base,debtor_vat_number:'IT12345678901'});
+  test('Ajout TVA débiteur → bascule vers TVA', vatAdded, 'IT12345678901');
 });
 
 /* ══ RESULTS ══ */
