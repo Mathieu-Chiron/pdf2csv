@@ -489,6 +489,7 @@ function isValidVAT(str){if(!str||typeof str!=='string')return false;const s=str
 function normalizeVAT(raw){if(!raw)return null;const s=String(raw).replace(/[\s.\-]/g,'').toUpperCase();return isValidVAT(s)?s:null;}
 function resolveVATAssignment(creditorVAT,debtorVAT){const c=creditorVAT?normalizeVAT(creditorVAT):null;const d=debtorVAT?normalizeVAT(debtorVAT):null;if(c&&d)return 'both';if(c)return 'creditor_only';if(d)return 'debtor_only';return 'none';}
 function switchVATValues(data){const tmp=data.creditor_vat_number;data.creditor_vat_number=data.debtor_vat_number;data.debtor_vat_number=tmp;return data;}
+function hasDuplicateVAT(c,d){if(!c||!d)return false;const nc=normalizeVAT(c),nd=normalizeVAT(d);return !!(nc&&nd&&nc===nd);}
 
 /* ══ STATE ══════════════════════════════════════════ */
 const S = {
@@ -648,6 +649,12 @@ function renderVATSection(inv,container){
     return div;
   };
   if(vatState==='both'){
+    if(hasDuplicateVAT(creditor,debtor)){
+      const warn=document.createElement('div');
+      warn.className='field-err';warn.style.marginBottom='8px';
+      warn.textContent='⚠ Les deux numéros TVA sont identiques — vérifiez l\'attribution.';
+      section.appendChild(warn);
+    }
     section.appendChild(mkField('creditor_vat_number','N° TVA créancier',creditor));
     const btn=document.createElement('button');btn.className='vat-switch-btn';
     btn.textContent='⇄ Inverser';btn.title='Inverser créancier / débiteur';
@@ -860,14 +867,16 @@ function showExport(){
     <div class="exp-stat"><div class="exp-stat-n">${S.invoices.length}</div><div class="exp-stat-l">Total</div></div>
     <div class="exp-stat"><div class="exp-stat-n" style="color:var(--teal-text);">${val.length}</div><div class="exp-stat-l">Validées</div></div>
     <div class="exp-stat"><div class="exp-stat-n" style="color:var(--amber-text);">${skip.length}</div><div class="exp-stat-l">Ignorées</div></div>`;
+  const activeVAT=VAT_FIELDS.filter(f=>S.invoices.some(inv=>inv.data[f.key]));
+  const exportFields=[...S.fields,...activeVAT];
   const thead=document.querySelector('#expTable thead'),tbody=document.querySelector('#expTable tbody');
-  thead.innerHTML='<tr>'+['Fichier',...S.fields.map(f=>f.label),'Statut'].map(h=>`<th>${esc(h)}</th>`).join('')+'</tr>';
+  thead.innerHTML='<tr>'+['Fichier',...exportFields.map(f=>f.label),'Statut'].map(h=>`<th>${esc(h)}</th>`).join('')+'</tr>';
   tbody.innerHTML='';
   S.invoices.forEach(inv=>{
     const tr=document.createElement('tr');
     if(inv.status==='validated') tr.style.cssText='background:var(--teal-bg);';
     tr.innerHTML=`<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(inv.file.name)}</td>`
-      +S.fields.map(f=>`<td>${esc(String(inv.data[f.key]??'—'))}</td>`).join('')
+      +exportFields.map(f=>`<td>${esc(String(inv.data[f.key]??'—'))}</td>`).join('')
       +`<td><span class="badge ${inv.status==='validated'?'b-ok':'b-warn'}">${inv.status==='validated'?'Validée':'Ignorée'}</span></td>`;
     tbody.appendChild(tr);
   });

@@ -158,6 +158,17 @@ function switchVATValues(data){
   return data;
 }
 
+function hasDuplicateVAT(creditorVAT,debtorVAT){
+  if(!creditorVAT||!debtorVAT) return false;
+  const c=normalizeVAT(creditorVAT),d=normalizeVAT(debtorVAT);
+  return !!(c&&d&&c===d);
+}
+
+/* mirrored from invoice-processor.html buildCSV */
+function getActiveVATFields(invoices,vatFields){
+  return vatFields.filter(f=>invoices.some(inv=>inv.data&&inv.data[f.key]));
+}
+
 /* ══ TEST ENGINE ══ */
 let pass=0, fail=0;
 function eq(a,b){return JSON.stringify(a)===JSON.stringify(b);}
@@ -359,6 +370,89 @@ suite('switchVATValues', ()=>{
   test('Échange avec null',           d2.creditor_vat_number, null);
   test('Null devient créancier',      d2.debtor_vat_number,   'FR12345678901');
   test('Retourne l\'objet',           switchVATValues({creditor_vat_number:'A',debtor_vat_number:'B'}).creditor_vat_number, 'B');
+});
+
+suite('Risque: même TVA pour créancier et débiteur (confusion Claude)', ()=>{
+  test('Deux valeurs identiques → détecté',    hasDuplicateVAT('FR12345678901','FR12345678901'), true);
+  test('Valeurs différentes → non détecté',    hasDuplicateVAT('FR12345678901','DE123456789'),  false);
+  test('Un null → non détecté',                hasDuplicateVAT('FR12345678901',null),           false);
+  test('Deux null → non détecté',              hasDuplicateVAT(null,null),                      false);
+  test('Identiques avec espaces → détecté',    hasDuplicateVAT('FR 12 345678901','FR12345678901'), true);
+  test('Identiques casse mixte → détecté',     hasDuplicateVAT('fr12345678901','FR12345678901'),   true);
+});
+
+suite('Risque: entrée non-string dans normalizeVAT', ()=>{
+  test('Nombre entier → null',      normalizeVAT(123456789),  null);
+  test('Nombre décimal → null',     normalizeVAT(12.34),      null);
+  test('Tableau → null',            normalizeVAT([]),         null);
+  test('Objet → null',              normalizeVAT({}),         null);
+  test('Booléen true → null',       normalizeVAT(true),       null);
+  test('undefined → null',          normalizeVAT(undefined),  null);
+});
+
+suite('Risque: chaîne "null" renvoyée par Claude', ()=>{
+  test('"null" string → null',       normalizeVAT('null'),    null);
+  test('"NULL" string → null',       normalizeVAT('NULL'),    null);
+  test('"Null" string → null',       normalizeVAT('Null'),    null);
+  test('"N/A" → null',               normalizeVAT('N/A'),     null);
+  test('"undefined" → null',         normalizeVAT('undefined'), null);
+});
+
+suite('Risque: TVA noyée dans du texte (Claude extrait trop)', ()=>{
+  test('TVA avec préfixe texte → null',  normalizeVAT('TVA: FR12345678901'),       null);
+  test('TVA avec suffixe texte → null',  normalizeVAT('FR12345678901 (créancier)'), null);
+  test('Phrase complète → null',         normalizeVAT('N° de TVA FR12345678901'),   null);
+  test('Valeur propre toujours valide',  normalizeVAT('FR12345678901'),             'FR12345678901');
+});
+
+suite('Risque: format AT sans préfixe U (piège fréquent)', ()=>{
+  test('AT sans U → invalide',     isValidVAT('AT12345678'),  false);
+  test('ATU correct → valide',     isValidVAT('ATU12345678'), true);
+  test('AT trop court → invalide', isValidVAT('ATU1234567'),  false);
+  test('AT trop long → invalide',  isValidVAT('ATU123456789'),false);
+});
+
+suite('Risque: double switch (idempotence)', ()=>{
+  const d={creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'};
+  switchVATValues(d);switchVATValues(d);
+  test('Switch×2 = valeur initiale créancier', d.creditor_vat_number, 'FR12345678901');
+  test('Switch×2 = valeur initiale débiteur',  d.debtor_vat_number,   'DE123456789');
+});
+
+suite('Risque: switch quand un côté est null', ()=>{
+  const d={creditor_vat_number:'FR12345678901',debtor_vat_number:null};
+  switchVATValues(d);
+  test('Créancier devient null',       d.creditor_vat_number, null);
+  test('Null migre vers débiteur',     d.debtor_vat_number,   'FR12345678901');
+  test('État = debtor_only après switch', resolveVATAssignment(d.creditor_vat_number,d.debtor_vat_number), 'debtor_only');
+});
+
+suite('Risque: champ vidé manuellement par l\'utilisateur', ()=>{
+  test('Valeur vide → resolveVAT none',  resolveVATAssignment('',''),             'none');
+  test('Un vide + un valide → one side', resolveVATAssignment('','DE123456789'),  'debtor_only');
+  test('normalizeVAT vide → null',       normalizeVAT(''),                        null);
+});
+
+suite('Risque: re-extraction change le nombre de TVA (champ résiduel)', ()=>{
+  // Simule: après re-extraction, seul creditor_vat revient, debtor_vat doit être null
+  const inv={data:{creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'}};
+  // Nouvelle extraction retourne seulement creditor
+  const newVAT={creditor_vat_number:'FR12345678901',debtor_vat_number:null};
+  Object.assign(inv.data,newVAT);
+  test('Débiteur effacé après re-extraction',   inv.data.debtor_vat_number,   null);
+  test('État correct après re-extraction',      resolveVATAssignment(inv.data.creditor_vat_number,inv.data.debtor_vat_number), 'creditor_only');
+});
+
+suite('Risque: colonnes TVA dans l\'export CSV (getActiveVATFields)', ()=>{
+  const vatFields=[{key:'creditor_vat_number'},{key:'debtor_vat_number'}];
+  const invWithBoth={data:{creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'}};
+  const invWithOne={data:{creditor_vat_number:'IT12345678901',debtor_vat_number:null}};
+  const invWithNone={data:{creditor_vat_number:null,debtor_vat_number:null}};
+  test('Deux TVA → deux colonnes',              getActiveVATFields([invWithBoth],vatFields).length,    2);
+  test('Une TVA → une colonne',                 getActiveVATFields([invWithOne],vatFields).length,     1);
+  test('Aucune TVA → aucune colonne',           getActiveVATFields([invWithNone],vatFields).length,    0);
+  test('Mix invoices → colonnes union',         getActiveVATFields([invWithOne,invWithNone],vatFields).length, 1);
+  test('Mix avec les deux → deux colonnes',     getActiveVATFields([invWithBoth,invWithNone],vatFields).length, 2);
 });
 
 /* ══ RESULTS ══ */
