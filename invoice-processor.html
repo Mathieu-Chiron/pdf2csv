@@ -91,7 +91,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 /* PDF PANEL */
 .pdf-panel{flex:1;border-right:.5px solid var(--bd);background:var(--bg3);display:flex;flex-direction:column;overflow:hidden;}
 .panel-head{padding:9px 15px;font-size:12px;font-weight:500;color:var(--text2);border-bottom:.5px solid var(--bd);flex-shrink:0;background:var(--bg2);display:flex;align-items:center;justify-content:space-between;gap:8px;}
-.pdf-vp{flex:1;overflow-y:auto;display:flex;align-items:flex-start;justify-content:center;padding:20px 14px;}
+.pdf-vp{flex:1;overflow-y:auto;display:flex;flex-direction:column;align-items:center;padding:20px 14px;}
 .pdf-vp::-webkit-scrollbar{width:4px;}
 .pdf-vp::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px;}
 .pdf-vp canvas{max-width:100%;border-radius:4px;box-shadow:0 1px 8px rgba(0,0,0,.14);}
@@ -550,15 +550,20 @@ async function renderPDF(file) {
     const buf=await file.arrayBuffer();
     const pdf=await pdfjsLib.getDocument({data:buf}).promise;
     document.getElementById('pdfInfo').textContent=`${pdf.numPages} page${pdf.numPages>1?'s':''}`;
-    const page=await pdf.getPage(1);
-    const vport=page.getViewport({scale:1});
     const w=vp.clientWidth-28;
-    const scale=Math.min(w/vport.width,2.2);
-    const sv=page.getViewport({scale});
-    const cv=document.createElement('canvas');
-    cv.width=sv.width;cv.height=sv.height;
-    await page.render({canvasContext:cv.getContext('2d'),viewport:sv}).promise;
-    vp.innerHTML='';vp.appendChild(cv);
+    vp.innerHTML='';
+    for(let i=1;i<=pdf.numPages;i++){
+      const page=await pdf.getPage(i);
+      const vport=page.getViewport({scale:1});
+      const scale=Math.min(w/vport.width,2.2);
+      const sv=page.getViewport({scale});
+      const cv=document.createElement('canvas');
+      cv.width=sv.width;cv.height=sv.height;
+      cv.style.display='block';
+      if(i>1)cv.style.marginTop='8px';
+      await page.render({canvasContext:cv.getContext('2d'),viewport:sv}).promise;
+      vp.appendChild(cv);
+    }
   } catch(e){vp.innerHTML='<div class="pdf-placeholder">Aperçu indisponible</div>';}
 }
 
