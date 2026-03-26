@@ -97,6 +97,67 @@ const fullData = {
   amount_ttc:'1500.50',invoice_total_amount_inc_vat:'1500.50',invoice_open_amount_inc_vat:'250.00'
 };
 
+/* ══ VAT VALIDATION ══════════════════════════════════ */
+const EU_VAT_PATTERNS = {
+  AT:/^ATU[0-9]{8}$/,
+  BE:/^BE[0-9]{10}$/,
+  BG:/^BG[0-9]{9,10}$/,
+  HR:/^HR[0-9]{11}$/,
+  CY:/^CY[0-9]{8}[A-Z]$/,
+  CZ:/^CZ[0-9]{8,10}$/,
+  DK:/^DK[0-9]{8}$/,
+  EE:/^EE[0-9]{9}$/,
+  FI:/^FI[0-9]{8}$/,
+  FR:/^FR[0-9A-Z]{2}[0-9]{9}$/,
+  DE:/^DE[0-9]{9}$/,
+  GR:/^EL[0-9]{9}$/,
+  HU:/^HU[0-9]{8}$/,
+  IE:/^IE[0-9]{7}[A-Z]{1,2}$/,
+  IT:/^IT[0-9]{11}$/,
+  LV:/^LV[0-9]{11}$/,
+  LT:/^LT([0-9]{9}|[0-9]{12})$/,
+  LU:/^LU[0-9]{8}$/,
+  MT:/^MT[0-9]{8}$/,
+  NL:/^NL[0-9]{9}B[0-9]{2}$/,
+  PL:/^PL[0-9]{10}$/,
+  PT:/^PT[0-9]{9}$/,
+  RO:/^RO[0-9]{2,10}$/,
+  SK:/^SK[0-9]{10}$/,
+  SI:/^SI[0-9]{8}$/,
+  ES:/^ES[A-Z0-9][0-9]{7}[A-Z0-9]$/,
+  SE:/^SE[0-9]{12}$/,
+  GB:/^GB([0-9]{9}|[0-9]{12}|GD[0-9]{3}|HA[0-9]{3})$/,
+  CH:/^CHE[0-9]{9}$/,
+};
+
+function isValidVAT(str){
+  if(!str||typeof str!=='string') return false;
+  const s=str.replace(/[\s.\-]/g,'').toUpperCase();
+  return Object.values(EU_VAT_PATTERNS).some(p=>p.test(s));
+}
+
+function normalizeVAT(raw){
+  if(!raw) return null;
+  const s=String(raw).replace(/[\s.\-]/g,'').toUpperCase();
+  return isValidVAT(s)?s:null;
+}
+
+function resolveVATAssignment(creditorVAT,debtorVAT){
+  const c=creditorVAT?normalizeVAT(creditorVAT):null;
+  const d=debtorVAT?normalizeVAT(debtorVAT):null;
+  if(c&&d) return 'both';
+  if(c) return 'creditor_only';
+  if(d) return 'debtor_only';
+  return 'none';
+}
+
+function switchVATValues(data){
+  const tmp=data.creditor_vat_number;
+  data.creditor_vat_number=data.debtor_vat_number;
+  data.debtor_vat_number=tmp;
+  return data;
+}
+
 /* ══ TEST ENGINE ══ */
 let pass=0, fail=0;
 function eq(a,b){return JSON.stringify(a)===JSON.stringify(b);}
@@ -237,6 +298,67 @@ suite('Intégration: ignorée → éditée → validée', ()=>{
   const i=makeInvoice('extracted',JSON.parse(JSON.stringify(fullData)));if(checkFields(i))i.status='validated';
   test('Après validation → validated', i.status,'validated');
   test('Plus dans skipped list',    getSkippedInvoices([makeInvoice('validated'),makeInvoice('validated')]),[]);
+});
+
+suite('isValidVAT — formats valides', ()=>{
+  test('FR 11 chiffres',              isValidVAT('FR12345678901'),    true);
+  test('FR clé alphabétique',         isValidVAT('FRAB123456789'),    true);
+  test('DE 9 chiffres',               isValidVAT('DE123456789'),      true);
+  test('IT 11 chiffres',              isValidVAT('IT12345678901'),    true);
+  test('ES format X9999999X',         isValidVAT('ESA1234567B'),      true);
+  test('NL avec B01',                 isValidVAT('NL123456789B01'),   true);
+  test('BE 10 chiffres',              isValidVAT('BE0123456789'),     true);
+  test('AT U+8 chiffres',             isValidVAT('ATU12345678'),      true);
+  test('PT 9 chiffres',               isValidVAT('PT123456789'),      true);
+  test('SE 12 chiffres',              isValidVAT('SE123456789012'),   true);
+  test('PL 10 chiffres',              isValidVAT('PL1234567890'),     true);
+  test('CH 9 chiffres',               isValidVAT('CHE123456789'),     true);
+  test('Espaces ignorés',             isValidVAT('FR 12 345678901'),  true);
+  test('Minuscules acceptées',        isValidVAT('fr12345678901'),    true);
+  test('Tirets ignorés',              isValidVAT('FR-12345678901'),   true);
+});
+
+suite('isValidVAT — formats invalides', ()=>{
+  test('Vide → false',                isValidVAT(''),                 false);
+  test('Null → false',                isValidVAT(null),               false);
+  test('Chiffres seuls',              isValidVAT('123456789'),        false);
+  test('Pays inconnu',                isValidVAT('XX12345678901'),    false);
+  test('FR trop court',               isValidVAT('FR123'),            false);
+  test('FR trop long',                isValidVAT('FR1234567890123'),  false);
+  test('Texte arbitraire',            isValidVAT('pas un TVA'),       false);
+  test('undefined → false',          isValidVAT(undefined),          false);
+});
+
+suite('normalizeVAT', ()=>{
+  test('FR valide → normalisé',       normalizeVAT('FR12345678901'),      'FR12345678901');
+  test('Espaces retirés',             normalizeVAT('FR 12 345 678 901'),  'FR12345678901');
+  test('Minuscules → majuscules',     normalizeVAT('fr12345678901'),      'FR12345678901');
+  test('Tirets retirés',              normalizeVAT('FR-12345678901'),     'FR12345678901');
+  test('DE valide',                   normalizeVAT('DE123456789'),        'DE123456789');
+  test('Invalide → null',             normalizeVAT('pas-un-tva'),         null);
+  test('Vide → null',                 normalizeVAT(''),                   null);
+  test('Null → null',                 normalizeVAT(null),                 null);
+});
+
+suite('resolveVATAssignment', ()=>{
+  test('Deux valides → both',         resolveVATAssignment('FR12345678901','DE123456789'),   'both');
+  test('Créancier seul',              resolveVATAssignment('FR12345678901',null),            'creditor_only');
+  test('Débiteur seul',               resolveVATAssignment(null,'DE123456789'),              'debtor_only');
+  test('Aucun → none',                resolveVATAssignment(null,null),                       'none');
+  test('Deux invalides → none',       resolveVATAssignment('invalide','invalide'),           'none');
+  test('Créancier invalide',          resolveVATAssignment('invalide','DE123456789'),        'debtor_only');
+  test('Avec espaces',                resolveVATAssignment('FR 12 345678901','DE123456789'), 'both');
+  test('Vides → none',                resolveVATAssignment('',''),                           'none');
+});
+
+suite('switchVATValues', ()=>{
+  const d1={creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'};switchVATValues(d1);
+  test('Créancier → débiteur',        d1.creditor_vat_number, 'DE123456789');
+  test('Débiteur → créancier',        d1.debtor_vat_number,   'FR12345678901');
+  const d2={creditor_vat_number:'FR12345678901',debtor_vat_number:null};switchVATValues(d2);
+  test('Échange avec null',           d2.creditor_vat_number, null);
+  test('Null devient créancier',      d2.debtor_vat_number,   'FR12345678901');
+  test('Retourne l\'objet',           switchVATValues({creditor_vat_number:'A',debtor_vat_number:'B'}).creditor_vat_number, 'B');
 });
 
 /* ══ RESULTS ══ */
