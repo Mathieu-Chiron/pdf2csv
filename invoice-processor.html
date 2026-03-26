@@ -699,6 +699,12 @@ function renderDebtorSection(inv,container){
     section.appendChild(typeRow);
   }
 
+  const mkSwitchBtn=()=>{
+    const btn=document.createElement('button');btn.className='vat-switch-btn';
+    btn.textContent='⇄ Inverser créancier / débiteur';btn.onclick=()=>switchVATUI();
+    return btn;
+  };
+
   // — Champs TVA —
   if(vatState==='both'){
     if(hasDuplicateVAT(creditor,debtor)){
@@ -707,15 +713,14 @@ function renderDebtorSection(inv,container){
       section.appendChild(warn);
     }
     section.appendChild(mkVatField('creditor_vat_number','N° TVA créancier',creditor,true));
-    const btn=document.createElement('button');btn.className='vat-switch-btn';
-    btn.textContent='⇄ Inverser';btn.title='Inverser créancier / débiteur';btn.onclick=()=>switchVATUI();
-    section.appendChild(btn);
+    section.appendChild(mkSwitchBtn());
     section.appendChild(mkVatField('debtor_vat_number','N° TVA débiteur',debtor,true));
   } else if(vatState==='debtor_only'){
     section.appendChild(mkVatField('debtor_vat_number','N° TVA débiteur',debtor,true));
   } else if(vatState==='creditor_only'){
     section.appendChild(mkVatField('creditor_vat_number','N° TVA créancier',creditor,true));
     if(state.showDebtorVatField){
+      section.appendChild(mkSwitchBtn());
       if(state.vatRequired){
         const warn=document.createElement('div');warn.className='debtor-vat-warn';
         warn.textContent='⚠ Le N° TVA du débiteur est obligatoire pour valider cette facture.';
@@ -732,14 +737,15 @@ function renderDebtorSection(inv,container){
     section.appendChild(mkVatField('debtor_vat_number','N° TVA débiteur',debtor,state.vatRequired));
   }
 
-  // — Code débiteur (toujours en bas, toujours en lecture seule) —
-  const code=state.code||'—';
+  // — Code débiteur : masqué si entreprise (toujours calculé/exporté) —
   inv.data.debtor_code=state.code||null;
-  const codeRow=document.createElement('div');codeRow.className='debtor-code-row';
-  codeRow.innerHTML=`<div class="field-lbl">Code débiteur</div>
-    <div class="debtor-code-val" id="debtorCodeVal">${esc(code)}</div>
-    <div class="debtor-code-hint">Calculé automatiquement — non modifiable</div>`;
-  section.appendChild(codeRow);
+  if(inv.debtorType!=='entreprise'){
+    const codeRow=document.createElement('div');codeRow.className='debtor-code-row';
+    codeRow.innerHTML=`<div class="field-lbl">Code débiteur</div>
+      <div class="debtor-code-val" id="debtorCodeVal">${esc(state.code||'—')}</div>
+      <div class="debtor-code-hint">Calculé automatiquement — non modifiable</div>`;
+    section.appendChild(codeRow);
+  }
 
   container.appendChild(section);
 }
