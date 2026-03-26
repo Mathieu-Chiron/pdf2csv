@@ -716,6 +716,8 @@ function renderDebtorSection(inv,container){
     section.appendChild(mkSwitchBtn());
     section.appendChild(mkVatField('debtor_vat_number','N° TVA débiteur',debtor,true));
   } else if(vatState==='debtor_only'){
+    section.appendChild(mkVatField('creditor_vat_number','N° TVA créancier',creditor,false));
+    section.appendChild(mkSwitchBtn());
     section.appendChild(mkVatField('debtor_vat_number','N° TVA débiteur',debtor,true));
   } else if(vatState==='creditor_only'){
     section.appendChild(mkVatField('creditor_vat_number','N° TVA créancier',creditor,true));
