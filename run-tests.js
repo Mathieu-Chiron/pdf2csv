@@ -188,6 +188,28 @@ function computeDebtorCode(data){
   return generateDebtorCode(data);
 }
 
+function shouldShowDebtorTypeSelector(vatState){
+  return vatState==='creditor_only'||vatState==='none';
+}
+
+function getDebtorCodeState(data,debtorType){
+  const vatState=resolveVATAssignment(data.creditor_vat_number,data.debtor_vat_number);
+  // B2B confirmé : 2 TVA ou TVA débiteur connue
+  if(vatState==='both'||vatState==='debtor_only'){
+    return{code:normalizeVAT(data.debtor_vat_number),locked:true,requireType:false,vatRequired:false,showDebtorVatField:false};
+  }
+  const code=computeDebtorCode(data);
+  // Type non encore défini
+  if(!debtorType){
+    return{code,locked:true,requireType:true,vatRequired:false,showDebtorVatField:true};
+  }
+  if(debtorType==='entreprise'){
+    return{code,locked:true,requireType:false,vatRequired:true,showDebtorVatField:true};
+  }
+  // particulier
+  return{code,locked:true,requireType:false,vatRequired:false,showDebtorVatField:false};
+}
+
 /* ══ TEST ENGINE ══ */
 let pass=0, fail=0;
 function eq(a,b){return JSON.stringify(a)===JSON.stringify(b);}
@@ -536,6 +558,99 @@ suite('computeDebtorCode — mise à jour auto sur changement de champ', ()=>{
   // Ajout d'une TVA débiteur → bascule vers TVA
   const vatAdded=computeDebtorCode({...base,debtor_vat_number:'IT12345678901'});
   test('Ajout TVA débiteur → bascule vers TVA', vatAdded, 'IT12345678901');
+});
+
+const baseData={debtor_company_name:'ACME SAS',debtor_post_city:'Paris',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001'};
+const withBothVAT={...baseData,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'};
+const withDebtorVAT={...baseData,creditor_vat_number:null,debtor_vat_number:'DE123456789'};
+const withCreditorVAT={...baseData,creditor_vat_number:'FR12345678901',debtor_vat_number:null};
+const withNoVAT={...baseData,creditor_vat_number:null,debtor_vat_number:null};
+const GENERATED='ACMPAR12R750';
+
+suite('shouldShowDebtorTypeSelector', ()=>{
+  test('both → false',         shouldShowDebtorTypeSelector('both'),          false);
+  test('debtor_only → false',  shouldShowDebtorTypeSelector('debtor_only'),   false);
+  test('creditor_only → true', shouldShowDebtorTypeSelector('creditor_only'), true);
+  test('none → true',          shouldShowDebtorTypeSelector('none'),          true);
+});
+
+suite('getDebtorCodeState — 2 TVA (B2B confirmé)', ()=>{
+  const s=getDebtorCodeState(withBothVAT,null);
+  test('code = TVA débiteur',  s.code,         'DE123456789');
+  test('locked',               s.locked,       true);
+  test('pas requireType',      s.requireType,  false);
+  test('pas vatRequired',      s.vatRequired,  false);
+  test('pas showDebtorVat',    s.showDebtorVatField, false);
+});
+
+suite('getDebtorCodeState — TVA débiteur seul', ()=>{
+  const s=getDebtorCodeState(withDebtorVAT,null);
+  test('code = TVA débiteur',  s.code,         'DE123456789');
+  test('pas requireType',      s.requireType,  false);
+  test('pas vatRequired',      s.vatRequired,  false);
+  test('pas showDebtorVat',    s.showDebtorVatField, false);
+});
+
+suite('getDebtorCodeState — TVA créancier seul, type non défini', ()=>{
+  const s=getDebtorCodeState(withCreditorVAT,null);
+  test('code généré',          s.code,         GENERATED);
+  test('requireType',          s.requireType,  true);
+  test('pas vatRequired',      s.vatRequired,  false);
+  test('showDebtorVat',        s.showDebtorVatField, true);
+});
+
+suite('getDebtorCodeState — TVA créancier seul + entreprise', ()=>{
+  const s=getDebtorCodeState(withCreditorVAT,'entreprise');
+  test('code généré',          s.code,         GENERATED);
+  test('pas requireType',      s.requireType,  false);
+  test('vatRequired',          s.vatRequired,  true);
+  test('showDebtorVat',        s.showDebtorVatField, true);
+  // Dès que l\'utilisateur saisit la TVA débiteur → code bascule
+  const withNewVAT={...withCreditorVAT,debtor_vat_number:'IT12345678901'};
+  test('TVA saisie → code = TVA débiteur', getDebtorCodeState(withNewVAT,'entreprise').code, 'IT12345678901');
+  test('TVA saisie → vatRequired disparaît', getDebtorCodeState(withNewVAT,'entreprise').vatRequired, false);
+});
+
+suite('getDebtorCodeState — TVA créancier seul + particulier', ()=>{
+  const s=getDebtorCodeState(withCreditorVAT,'particulier');
+  test('code généré',          s.code,         GENERATED);
+  test('pas requireType',      s.requireType,  false);
+  test('pas vatRequired',      s.vatRequired,  false);
+  test('pas showDebtorVat',    s.showDebtorVatField, false);
+});
+
+suite('getDebtorCodeState — aucune TVA, type non défini', ()=>{
+  const s=getDebtorCodeState(withNoVAT,null);
+  test('code généré',          s.code,         GENERATED);
+  test('requireType',          s.requireType,  true);
+  test('pas vatRequired',      s.vatRequired,  false);
+  test('showDebtorVat',        s.showDebtorVatField, true);
+});
+
+suite('getDebtorCodeState — aucune TVA + entreprise', ()=>{
+  const s=getDebtorCodeState(withNoVAT,'entreprise');
+  test('code généré',          s.code,         GENERATED);
+  test('pas requireType',      s.requireType,  false);
+  test('vatRequired',          s.vatRequired,  true);
+  test('showDebtorVat',        s.showDebtorVatField, true);
+  // Mise à jour dynamique du code quand nom change
+  const renamed={...withNoVAT,debtor_company_name:'DUPONT SA'};
+  test('Code se met à jour si nom change', getDebtorCodeState(renamed,'entreprise').code.slice(0,3), 'DUP');
+});
+
+suite('getDebtorCodeState — aucune TVA + particulier', ()=>{
+  const s=getDebtorCodeState(withNoVAT,'particulier');
+  test('code généré',          s.code,         GENERATED);
+  test('pas vatRequired',      s.vatRequired,  false);
+  test('pas showDebtorVat',    s.showDebtorVatField, false);
+});
+
+suite('Validation: blocage si entreprise sans TVA débiteur', ()=>{
+  test('Créancier+entreprise sans TVA → bloqué',  getDebtorCodeState(withCreditorVAT,'entreprise').vatRequired, true);
+  test('Créancier+entreprise avec TVA → libre',   getDebtorCodeState({...withCreditorVAT,debtor_vat_number:'IT12345678901'},'entreprise').vatRequired, false);
+  test('Aucune+entreprise → bloqué',              getDebtorCodeState(withNoVAT,'entreprise').vatRequired, true);
+  test('Aucune+particulier → libre',              getDebtorCodeState(withNoVAT,'particulier').vatRequired, false);
+  test('2 TVA → toujours libre',                  getDebtorCodeState(withBothVAT,'entreprise').vatRequired, false);
 });
 
 /* ══ RESULTS ══ */

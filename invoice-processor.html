@@ -113,8 +113,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .field-input.empty{border-color:var(--amber);background:var(--amber-bg);}
 .field-err{font-size:11px;color:var(--red);margin-top:3px;}
 .field-hint{font-size:11px;color:var(--teal-text);margin-top:3px;}
+.debtor-section{margin-top:14px;padding-top:14px;border-top:.5px solid var(--bd);}
+.debtor-section-title{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px;}
+.debtor-type-row{display:flex;gap:6px;margin-bottom:14px;}
+.debtor-type-btn{flex:1;padding:7px 10px;border-radius:6px;cursor:pointer;border:1px solid var(--bd2);background:var(--bg2);color:var(--text);font-size:13px;text-align:center;}
+.debtor-type-btn:hover{border-color:var(--teal);background:var(--teal-bg);color:var(--teal-text);}
+.debtor-type-btn.active{border-color:var(--teal);background:var(--teal-bg);color:var(--teal-text);font-weight:600;}
+.debtor-vat-warn{font-size:12px;color:var(--amber-text);background:var(--amber-bg);border-radius:5px;padding:7px 10px;margin-bottom:10px;}
 .debtor-code-row{margin-bottom:14px;}
-.debtor-code-val{font-family:monospace;font-size:13px;font-weight:600;letter-spacing:.06em;background:var(--bg3);border:.5px solid var(--bd2);border-radius:6px;padding:7px 10px;color:var(--text);user-select:all;cursor:default;}
+.debtor-code-val{font-family:monospace;font-size:13px;font-weight:600;letter-spacing:.06em;background:var(--bg3);border:.5px solid var(--bd2);border-radius:6px;padding:7px 10px;color:var(--text2);user-select:all;cursor:default;}
 .debtor-code-hint{font-size:11px;color:var(--text3);margin-top:3px;}
 .vat-section{margin-top:14px;padding-top:14px;border-top:.5px solid var(--bd);}
 .vat-section-title{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px;}
@@ -499,6 +506,15 @@ const DEBTOR_CODE_SOURCES=['debtor_company_name','debtor_post_city','debtor_post
 function extractCode(str,n=3){if(!str)return 'X'.repeat(n);const s=String(str).toUpperCase().replace(/[^A-Z0-9]/g,'');return(s.slice(0,n)||'').padEnd(n,'X');}
 function generateDebtorCode(data){return DEBTOR_CODE_SOURCES.map(k=>extractCode(data[k],3)).join('');}
 function computeDebtorCode(data){const vatState=resolveVATAssignment(data.creditor_vat_number,data.debtor_vat_number);if(vatState==='both'||vatState==='debtor_only')return normalizeVAT(data.debtor_vat_number);return generateDebtorCode(data);}
+function shouldShowDebtorTypeSelector(vatState){return vatState==='creditor_only'||vatState==='none';}
+function getDebtorCodeState(data,debtorType){
+  const vatState=resolveVATAssignment(data.creditor_vat_number,data.debtor_vat_number);
+  if(vatState==='both'||vatState==='debtor_only') return{code:normalizeVAT(data.debtor_vat_number),locked:true,requireType:false,vatRequired:false,showDebtorVatField:false};
+  const code=computeDebtorCode(data);
+  if(!debtorType) return{code,locked:true,requireType:true,vatRequired:false,showDebtorVatField:true};
+  if(debtorType==='entreprise') return{code,locked:true,requireType:false,vatRequired:true,showDebtorVatField:true};
+  return{code,locked:true,requireType:false,vatRequired:false,showDebtorVatField:false};
+}
 
 /* ══ STATE ══════════════════════════════════════════ */
 const S = {
@@ -607,18 +623,14 @@ async function renderPDF(file) {
 
 /* ══ FIELDS UI ════════════════════════════════════════ */
 function renderDebtorCode(inv){
-  const code=computeDebtorCode(inv.data);
-  inv.data.debtor_code=code;
+  const state=getDebtorCodeState(inv.data,inv.debtorType||null);
+  inv.data.debtor_code=state.code||null;
   const el=document.getElementById('debtorCodeVal');
-  if(el) el.textContent=code||'—';
+  if(el) el.textContent=state.code||'—';
 }
 
 function renderFieldsUI(inv) {
   const c=document.getElementById('fieldsContent');c.innerHTML='';
-  const codeRow=document.createElement('div');codeRow.className='debtor-code-row';
-  const code=computeDebtorCode(inv.data);inv.data.debtor_code=code;
-  codeRow.innerHTML=`<div class="field-lbl">Code débiteur</div><div class="debtor-code-val" id="debtorCodeVal">${esc(code||'—')}</div><div class="debtor-code-hint">Calculé automatiquement — non modifiable</div>`;
-  c.appendChild(codeRow);
   S.fields.forEach(f=>{
     const raw=inv.data[f.key],val=raw!=null?String(raw):'';
     const err=inv.errors?.[f.key],wasNorm=inv.rawNorm?.[f.key]===true;
@@ -649,51 +661,95 @@ function renderFieldsUI(inv) {
     `;
     c.appendChild(row);
   });
-  renderVATSection(inv,c);
+  renderDebtorSection(inv,c);
 }
 
-function renderVATSection(inv,container){
+function renderDebtorSection(inv,container){
   const creditor=inv.data.creditor_vat_number||null;
   const debtor=inv.data.debtor_vat_number||null;
   const vatState=resolveVATAssignment(creditor,debtor);
-  if(vatState==='none') return;
-  const section=document.createElement('div');section.className='vat-section';
-  section.innerHTML='<div class="vat-section-title">Numéros TVA</div>';
-  const mkField=(key,label,val)=>{
+  const state=getDebtorCodeState(inv.data,inv.debtorType||null);
+
+  const section=document.createElement('div');section.className='debtor-section';
+  section.innerHTML='<div class="debtor-section-title">Identification débiteur</div>';
+
+  const mkVatField=(key,label,val,required)=>{
     const err=inv.errors?.[key];
     const div=document.createElement('div');div.className='field-row';
-    div.innerHTML=`<div class="field-lbl">${esc(label)}<span class="req">*</span></div>
+    div.innerHTML=`<div class="field-lbl">${esc(label)}${required?'<span class="req">*</span>':''}</div>
       <input class="field-input${err?' empty':''}" type="text" id="fi_${key}" value="${esc(val||'')}"
         placeholder="Ex: FR12345678901" oninput="onFI('${key}',this.value)"/>
       ${err?`<div class="field-err">${esc(err)}</div>`:''}`;
     return div;
   };
+
+  // — Sélecteur de type si nécessaire —
+  if(state.requireType){
+    const typeRow=document.createElement('div');typeRow.className='debtor-type-row';
+    typeRow.innerHTML=`<span style="font-size:12px;color:var(--text2);align-self:center;flex-shrink:0;">Type de client :</span>
+      <button class="debtor-type-btn" onclick="setDebtorType('particulier')">👤 Particulier</button>
+      <button class="debtor-type-btn" onclick="setDebtorType('entreprise')">🏢 Entreprise</button>`;
+    section.appendChild(typeRow);
+  } else if(shouldShowDebtorTypeSelector(vatState)){
+    // Type déjà défini — affiche les boutons avec le sélectionné actif
+    const typeRow=document.createElement('div');typeRow.className='debtor-type-row';
+    typeRow.innerHTML=`<span style="font-size:12px;color:var(--text2);align-self:center;flex-shrink:0;">Type de client :</span>
+      <button class="debtor-type-btn${inv.debtorType==='particulier'?' active':''}" onclick="setDebtorType('particulier')">👤 Particulier</button>
+      <button class="debtor-type-btn${inv.debtorType==='entreprise'?' active':''}" onclick="setDebtorType('entreprise')">🏢 Entreprise</button>`;
+    section.appendChild(typeRow);
+  }
+
+  // — Champs TVA —
   if(vatState==='both'){
     if(hasDuplicateVAT(creditor,debtor)){
-      const warn=document.createElement('div');
-      warn.className='field-err';warn.style.marginBottom='8px';
+      const warn=document.createElement('div');warn.className='field-err';warn.style.marginBottom='8px';
       warn.textContent='⚠ Les deux numéros TVA sont identiques — vérifiez l\'attribution.';
       section.appendChild(warn);
     }
-    section.appendChild(mkField('creditor_vat_number','N° TVA créancier',creditor));
+    section.appendChild(mkVatField('creditor_vat_number','N° TVA créancier',creditor,true));
     const btn=document.createElement('button');btn.className='vat-switch-btn';
-    btn.textContent='⇄ Inverser';btn.title='Inverser créancier / débiteur';
-    btn.onclick=()=>switchVATUI();
+    btn.textContent='⇄ Inverser';btn.title='Inverser créancier / débiteur';btn.onclick=()=>switchVATUI();
     section.appendChild(btn);
-    section.appendChild(mkField('debtor_vat_number','N° TVA débiteur',debtor));
-  } else {
-    const isCreditor=vatState==='creditor_only';
-    const val=isCreditor?creditor:debtor;
-    const key=isCreditor?'creditor_vat_number':'debtor_vat_number';
-    const label=isCreditor?'N° TVA créancier':'N° TVA débiteur';
-    section.appendChild(mkField(key,label,val));
-    const row=document.createElement('div');row.className='vat-assign-row';
-    row.innerHTML=`<span class="vat-assign-lbl">Attribuer à :</span>
-      <button class="vat-assign-btn${isCreditor?' active':''}" onclick="assignVAT('${esc(val||'')}','creditor')">Créancier</button>
-      <button class="vat-assign-btn${!isCreditor?' active':''}" onclick="assignVAT('${esc(val||'')}','debtor')">Débiteur</button>`;
-    section.appendChild(row);
+    section.appendChild(mkVatField('debtor_vat_number','N° TVA débiteur',debtor,true));
+  } else if(vatState==='debtor_only'){
+    section.appendChild(mkVatField('debtor_vat_number','N° TVA débiteur',debtor,true));
+  } else if(vatState==='creditor_only'){
+    section.appendChild(mkVatField('creditor_vat_number','N° TVA créancier',creditor,true));
+    if(state.showDebtorVatField){
+      if(state.vatRequired){
+        const warn=document.createElement('div');warn.className='debtor-vat-warn';
+        warn.textContent='⚠ Le N° TVA du débiteur est obligatoire pour valider cette facture.';
+        section.appendChild(warn);
+      }
+      section.appendChild(mkVatField('debtor_vat_number','N° TVA débiteur',debtor,state.vatRequired));
+    }
+  } else if(vatState==='none' && state.showDebtorVatField){
+    if(state.vatRequired){
+      const warn=document.createElement('div');warn.className='debtor-vat-warn';
+      warn.textContent='⚠ Le N° TVA du débiteur est obligatoire pour valider cette facture.';
+      section.appendChild(warn);
+    }
+    section.appendChild(mkVatField('debtor_vat_number','N° TVA débiteur',debtor,state.vatRequired));
   }
+
+  // — Code débiteur (toujours en bas, toujours en lecture seule) —
+  const code=state.code||'—';
+  inv.data.debtor_code=state.code||null;
+  const codeRow=document.createElement('div');codeRow.className='debtor-code-row';
+  codeRow.innerHTML=`<div class="field-lbl">Code débiteur</div>
+    <div class="debtor-code-val" id="debtorCodeVal">${esc(code)}</div>
+    <div class="debtor-code-hint">Calculé automatiquement — non modifiable</div>`;
+  section.appendChild(codeRow);
+
   container.appendChild(section);
+}
+
+function setDebtorType(type){
+  if(S.cur===-1) return;
+  const inv=S.invoices[S.cur];
+  inv.debtorType=type;
+  if(inv.status==='validated'||inv.status==='skipped') inv.status='extracted';
+  selectInv(S.cur);
 }
 
 function switchVATUI(){
@@ -842,6 +898,8 @@ function checkFields(inv){
     if(!n){inv.errors.debtor_vat_number='N° TVA débiteur invalide';ok=false;}
     else inv.data.debtor_vat_number=n;
   }
+  const state=getDebtorCodeState(inv.data,inv.debtorType||null);
+  if(state.vatRequired){inv.errors.debtor_vat_number='N° TVA débiteur obligatoire pour une entreprise';ok=false;}
   return ok;
 }
 
