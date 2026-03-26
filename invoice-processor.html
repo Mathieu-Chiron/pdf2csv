@@ -683,15 +683,8 @@ function renderDebtorSection(inv,container){
     return div;
   };
 
-  // — Sélecteur de type si nécessaire —
-  if(state.requireType){
-    const typeRow=document.createElement('div');typeRow.className='debtor-type-row';
-    typeRow.innerHTML=`<span style="font-size:12px;color:var(--text2);align-self:center;flex-shrink:0;">Type de client :</span>
-      <button class="debtor-type-btn" onclick="setDebtorType('particulier')">👤 Particulier</button>
-      <button class="debtor-type-btn" onclick="setDebtorType('entreprise')">🏢 Entreprise</button>`;
-    section.appendChild(typeRow);
-  } else if(shouldShowDebtorTypeSelector(vatState)){
-    // Type déjà défini — affiche les boutons avec le sélectionné actif
+  // — Sélecteur de type (persistant, toujours visible quand nécessaire) —
+  if(shouldShowDebtorTypeSelector(vatState)){
     const typeRow=document.createElement('div');typeRow.className='debtor-type-row';
     typeRow.innerHTML=`<span style="font-size:12px;color:var(--text2);align-self:center;flex-shrink:0;">Type de client :</span>
       <button class="debtor-type-btn${inv.debtorType==='particulier'?' active':''}" onclick="setDebtorType('particulier')">👤 Particulier</button>
