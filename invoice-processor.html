@@ -512,6 +512,8 @@ function generateDebtorCode(data){return DEBTOR_CODE_SOURCES.map(k=>extractCode(
 function computeDebtorCode(data){const vatState=resolveVATAssignment(data.creditor_vat_number,data.debtor_vat_number);if(vatState==='both'||vatState==='debtor_only')return normalizeVAT(data.debtor_vat_number);return generateDebtorCode(data);}
 function shouldShowDebtorTypeSelector(vatState){return vatState==='creditor_only'||vatState==='none';}
 function getDebtorCodeState(data,debtorType){
+  // B2C: debtorType takes priority — always generate code, ignore stored debtor_vat
+  if(debtorType==='particulier') return{code:generateDebtorCode(data),locked:true,requireType:false,vatRequired:false,showDebtorVatField:false};
   const vatState=resolveVATAssignment(data.creditor_vat_number,data.debtor_vat_number);
   if(vatState==='both'||vatState==='debtor_only') return{code:normalizeVAT(data.debtor_vat_number),locked:true,requireType:false,vatRequired:false,showDebtorVatField:false};
   const code=computeDebtorCode(data);
@@ -747,7 +749,6 @@ function setDebtorType(type){
   if(S.cur===-1) return;
   const inv=S.invoices[S.cur];
   inv.debtorType=type;
-  if(type==='particulier') inv.data.debtor_vat_number=null;
   if(inv.status==='validated'||inv.status==='skipped') inv.status='extracted';
   selectInv(S.cur);
 }
@@ -897,18 +898,18 @@ function checkFields(inv){
       :'Format invalide — attendu : code pays + numéro (ex : FR12345678901, DE123456789)';
     ok=false;
   } else inv.data.creditor_vat_number=nc;
-  // B2C: clear any stale debtor_vat (re-extraction may have repopulated it)
-  if(inv.debtorType==='particulier') inv.data.debtor_vat_number=null;
-  // Debtor VAT: validate if field has any non-empty value
-  const rawD=inv.data.debtor_vat_number;
-  const hasDebtorValue=rawD!=null&&String(rawD).trim()!==''&&String(rawD).toLowerCase()!=='null';
-  if(hasDebtorValue){
-    const nd=normalizeVAT(rawD);
-    if(!nd){inv.errors.debtor_vat_number='Format invalide — attendu : code pays + numéro (ex : FR12345678901, DE123456789)';ok=false;}
-    else inv.data.debtor_vat_number=nd;
+  // B2C: field is greyed out — skip debtor_vat validation (value preserved, masked in CSV export)
+  if(inv.debtorType!=='particulier'){
+    const rawD=inv.data.debtor_vat_number;
+    const hasDebtorValue=rawD!=null&&String(rawD).trim()!==''&&String(rawD).toLowerCase()!=='null';
+    if(hasDebtorValue){
+      const nd=normalizeVAT(rawD);
+      if(!nd){inv.errors.debtor_vat_number='Format invalide — attendu : code pays + numéro (ex : FR12345678901, DE123456789)';ok=false;}
+      else inv.data.debtor_vat_number=nd;
+    }
+    const state=getDebtorCodeState(inv.data,inv.debtorType||null);
+    if(state.vatRequired){inv.errors.debtor_vat_number='N° TVA débiteur requis pour une entreprise — ex : FR12345678901';ok=false;}
   }
-  const state=getDebtorCodeState(inv.data,inv.debtorType||null);
-  if(state.vatRequired){inv.errors.debtor_vat_number='N° TVA débiteur requis pour une entreprise — ex : FR12345678901';ok=false;}
   return ok;
 }
 
@@ -956,7 +957,10 @@ function showExport(){
     <div class="exp-stat"><div class="exp-stat-n">${S.invoices.length}</div><div class="exp-stat-l">Total</div></div>
     <div class="exp-stat"><div class="exp-stat-n" style="color:var(--teal-text);">${val.length}</div><div class="exp-stat-l">Validées</div></div>
     <div class="exp-stat"><div class="exp-stat-n" style="color:var(--amber-text);">${skip.length}</div><div class="exp-stat-l">Ignorées</div></div>`;
-  const activeVAT=VAT_FIELDS.filter(f=>S.invoices.some(inv=>inv.data[f.key]));
+  const activeVAT=VAT_FIELDS.filter(f=>{
+    if(f.key==='debtor_vat_number') return val.some(inv=>inv.data[f.key]&&inv.debtorType!=='particulier');
+    return val.some(inv=>inv.data[f.key]);
+  });
   const exportFields=[...S.fields,...activeVAT,{key:'debtor_code',label:'Code débiteur'}];
   const thead=document.querySelector('#expTable thead'),tbody=document.querySelector('#expTable tbody');
   thead.innerHTML='<tr>'+['Fichier',...exportFields.map(f=>f.label),'Statut'].map(h=>`<th>${esc(h)}</th>`).join('')+'</tr>';
@@ -977,10 +981,17 @@ function snName(s){return s.replace(/[\/\\:*?"<>|]/g,'').replace(/\s+/g,'_').sli
 function getPdfFilename(inv){const num=inv.data['invoice_number'];return(num&&String(num).trim())?snName(String(num))+'.pdf':snName(inv.file.name);}
 function buildCSV(){
   const validated=S.invoices.filter(i=>i.status==='validated');
-  const activeVAT=VAT_FIELDS.filter(f=>S.invoices.some(inv=>inv.data[f.key]));
+  // B2C invoices store debtor_vat but it must not drive column presence or cell value
+  const activeVAT=VAT_FIELDS.filter(f=>{
+    if(f.key==='debtor_vat_number') return validated.some(inv=>inv.data[f.key]&&inv.debtorType!=='particulier');
+    return validated.some(inv=>inv.data[f.key]);
+  });
   const exportFields=[...S.fields,...activeVAT,{key:'debtor_code',label:'Code débiteur'}];
   const header=exportFields.map(f=>`"${f.label}"`).join(',');
-  const rows=validated.map(inv=>exportFields.map(f=>{const v=inv.data[f.key]??'';return'"'+String(v).replace(/"/g,'""')+'"';}).join(','));
+  const rows=validated.map(inv=>exportFields.map(f=>{
+    const v=(f.key==='debtor_vat_number'&&inv.debtorType==='particulier')?'':inv.data[f.key]??'';
+    return'"'+String(v).replace(/"/g,'""').replace(/\r?\n/g,' ')+'"';
+  }).join(','));
   return [header,...rows].join('\n');
 }
 function exportCSV(){dlBlob(new Blob(['\uFEFF'+buildCSV()],{type:'text/csv;charset=utf-8;'}),'factures.csv');}

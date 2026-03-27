@@ -80,18 +80,18 @@ function checkFields(inv) {
       :'Format invalide — attendu : code pays + numéro (ex : FR12345678901, DE123456789)';
     ok=false;
   } else inv.data.creditor_vat_number=nc;
-  // B2C: clear any stale debtor_vat (re-extraction may have repopulated it)
-  if(inv.debtorType==='particulier') inv.data.debtor_vat_number=null;
-  // Debtor VAT: validate if field has any non-empty value
-  const rawD=inv.data.debtor_vat_number;
-  const hasDebtorValue=rawD!=null&&String(rawD).trim()!==''&&String(rawD).toLowerCase()!=='null';
-  if(hasDebtorValue){
-    const nd=normalizeVAT(rawD);
-    if(!nd){inv.errors.debtor_vat_number='Format invalide — attendu : code pays + numéro (ex : FR12345678901, DE123456789)';ok=false;}
-    else inv.data.debtor_vat_number=nd;
+  // B2C: field is greyed out — skip debtor_vat validation (value preserved, masked in CSV export)
+  if(inv.debtorType!=='particulier'){
+    const rawD=inv.data.debtor_vat_number;
+    const hasDebtorValue=rawD!=null&&String(rawD).trim()!==''&&String(rawD).toLowerCase()!=='null';
+    if(hasDebtorValue){
+      const nd=normalizeVAT(rawD);
+      if(!nd){inv.errors.debtor_vat_number='Format invalide — attendu : code pays + numéro (ex : FR12345678901, DE123456789)';ok=false;}
+      else inv.data.debtor_vat_number=nd;
+    }
+    const state=getDebtorCodeState(inv.data,inv.debtorType||null);
+    if(state.vatRequired){inv.errors.debtor_vat_number='N° TVA débiteur requis pour une entreprise — ex : FR12345678901';ok=false;}
   }
-  const state=getDebtorCodeState(inv.data,inv.debtorType||null);
-  if(state.vatRequired){inv.errors.debtor_vat_number='N° TVA débiteur requis pour une entreprise — ex : FR12345678901';ok=false;}
   return ok;
 }
 function simulateValidation(data,fields){const errors={};let ok=true;fields.forEach(f=>{const v=data[f.key],res=vandn(v,f);if(!res.valid){errors[f.key]=res.errs[0];ok=false;}});return{ok,errors};}
@@ -216,6 +216,10 @@ function shouldShowDebtorTypeSelector(vatState){
 }
 
 function getDebtorCodeState(data,debtorType){
+  // B2C: debtorType takes priority — always generate code, ignore stored debtor_vat
+  if(debtorType==='particulier'){
+    return{code:generateDebtorCode(data),locked:true,requireType:false,vatRequired:false,showDebtorVatField:false};
+  }
   const vatState=resolveVATAssignment(data.creditor_vat_number,data.debtor_vat_number);
   // B2B confirmé : 2 TVA ou TVA débiteur connue
   if(vatState==='both'||vatState==='debtor_only'){
@@ -226,10 +230,10 @@ function getDebtorCodeState(data,debtorType){
   if(!debtorType){
     return{code,locked:true,requireType:true,vatRequired:false,showDebtorVatField:true};
   }
+  // entreprise
   if(debtorType==='entreprise'){
     return{code,locked:true,requireType:false,vatRequired:true,showDebtorVatField:true};
   }
-  // particulier
   return{code,locked:true,requireType:false,vatRequired:false,showDebtorVatField:false};
 }
 
@@ -786,10 +790,18 @@ suite('Risque: checkFields idempotent (double appel sans corruption)', ()=>{
 // Helper: builds CSV rows the same way buildCSV does in the app
 const VAT_FIELDS_SIM=[{key:'creditor_vat_number',label:'N° TVA créancier'},{key:'debtor_vat_number',label:'N° TVA débiteur'}];
 function simulateBuildCSV(invoices){
-  const activeVAT=getActiveVATFields(invoices,VAT_FIELDS_SIM);
+  const validated=invoices.filter(i=>i.status==='validated');
+  // B2C invoices store debtor_vat but it must not drive column presence or cell value
+  const activeVAT=VAT_FIELDS_SIM.filter(f=>{
+    if(f.key==='debtor_vat_number') return validated.some(inv=>inv.data&&inv.data[f.key]&&inv.debtorType!=='particulier');
+    return validated.some(inv=>inv.data&&inv.data[f.key]);
+  });
   const exportFields=[...FIELDS,...activeVAT,{key:'debtor_code',label:'Code débiteur'}];
   const header=exportFields.map(f=>f.label).join(',');
-  const rows=invoices.map(inv=>exportFields.map(f=>String(inv.data[f.key]??'')).join(','));
+  const rows=validated.map(inv=>exportFields.map(f=>{
+    const v=(f.key==='debtor_vat_number'&&inv.debtorType==='particulier')?'':String(inv.data[f.key]??'');
+    return v;
+  }).join(','));
   return{header,rows,exportFields,csv:[header,...rows].join('\n')};
 }
 
@@ -903,9 +915,9 @@ function getVATFieldsState(debtorType){
 }
 
 // Simulate setDebtorType — mirrors what the app does on button click
+// B2C click greys out the field but does NOT clear the stored value
 function simulateSetDebtorType(inv,type){
   inv.debtorType=type;
-  if(type==='particulier') inv.data.debtor_vat_number=null; // B2C has no VAT
   return inv;
 }
 
@@ -929,15 +941,15 @@ suite('État visuel: type non défini → tout actif', ()=>{
   test('undefined: debtorVatDisabled = false', su.debtorVatDisabled, false);
 });
 
-suite('setDebtorType B2C: efface debtor_vat_number', ()=>{
+suite('setDebtorType B2C: grise le champ sans effacer la valeur', ()=>{
   const inv={data:{...baseOK,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'},errors:{},debtorType:null,status:'extracted'};
   simulateSetDebtorType(inv,'particulier');
-  test('B2C: debtor_vat_number effacé',   inv.data.debtor_vat_number, null);
-  test('B2C: debtorType = particulier',   inv.debtorType, 'particulier');
-  // checkFields passe car debtor_vat est null et type=particulier
+  test('B2C: debtor_vat_number préservé (non effacé)', inv.data.debtor_vat_number, 'DE123456789');
+  test('B2C: debtorType = particulier',                inv.debtorType, 'particulier');
+  // checkFields passe car la validation TVA débiteur est sautée pour B2C
   const ok=checkFields(inv);
-  test('B2C sans TVA débiteur : valide',  ok, true);
-  test('B2C sans TVA débiteur : aucune erreur débiteur', inv.errors.debtor_vat_number, undefined);
+  test('B2C avec TVA débiteur stockée : valide',       ok, true);
+  test('B2C : aucune erreur débiteur',                 inv.errors.debtor_vat_number, undefined);
 });
 
 suite('setDebtorType B2B: conserve ou attend debtor_vat_number', ()=>{
@@ -954,15 +966,15 @@ suite('setDebtorType B2B: conserve ou attend debtor_vat_number', ()=>{
   test('B2B avec TVA débiteur : valide',  checkFields(inv), true);
 });
 
-suite('setDebtorType: basculement B2B→B2C efface TVA débiteur', ()=>{
+suite('setDebtorType: basculement B2B→B2C→B2B conserve TVA débiteur', ()=>{
   const inv={data:{...baseOK,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'},errors:{},debtorType:'entreprise',status:'extracted'};
-  // Basculement vers B2C
+  // Basculement vers B2C — valeur préservée
   simulateSetDebtorType(inv,'particulier');
-  test('Après B2B→B2C : debtor_vat effacé', inv.data.debtor_vat_number, null);
-  // Puis re-basculement vers B2B (la TVA est perdue, l\'utilisateur devra la re-saisir)
+  test('Après B2B→B2C : debtor_vat préservé', inv.data.debtor_vat_number, 'DE123456789');
+  // Re-basculement vers B2B — la TVA est toujours là
   simulateSetDebtorType(inv,'entreprise');
-  test('Après B2C→B2B : debtor_vat toujours null', inv.data.debtor_vat_number, null);
-  test('B2B sans TVA après bascule : bloqué', checkFields(inv), false);
+  test('Après B2C→B2B : debtor_vat récupéré', inv.data.debtor_vat_number, 'DE123456789');
+  test('B2B avec TVA récupérée : valide',      checkFields(inv), true);
 });
 
 /* ══ MESSAGES D'ERREUR SPÉCIFIQUES ══════════════════ */
@@ -1028,85 +1040,91 @@ suite('Sélecteur type: toujours visible quelle que soit vatState', ()=>{
   // (testé via getDebtorCodeState qui utilise debtorType)
   const withBoth={...baseValid,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'};
   const s=getDebtorCodeState(withBoth,'particulier');
-  test('debtorType conservé même si 2 TVA (both)',  s.code, 'DE123456789');
+  // B2C takes priority: generated code even if 2 VATs are stored
+  test('B2C prioritaire sur vatState both → code généré', s.code, generateDebtorCode(withBoth));
 });
 
 /* ══ RISQUES: SETUP B2C/B2B GRISAGE ═════════════════ */
 
 suite('Risque 1: re-extraction repopule debtor_vat sur facture B2C', ()=>{
-  // Utilisateur a choisi B2C (debtor_vat effacé), puis re-extrait
-  // Claude re-détecte un debtor_vat → il ne doit PAS subsister pour B2C
+  // Utilisateur a choisi B2C, puis re-extrait → Claude re-détecte un debtor_vat
+  // La valeur est préservée dans les données mais ignorée pour la validation et le CSV
   const inv={data:{...baseOK,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'},errors:{},debtorType:'particulier'};
-  // checkFields doit effacer debtor_vat et passer
   const ok=checkFields(inv);
-  test('B2C + debtor_vat résiduel → checkFields efface la valeur', inv.data.debtor_vat_number, null);
-  test('B2C + debtor_vat résiduel → checkFields passe',            ok, true);
-  test('B2C + debtor_vat résiduel → aucune erreur debtor',         inv.errors.debtor_vat_number, undefined);
+  test('B2C + debtor_vat résiduel → valeur préservée (non effacée)', inv.data.debtor_vat_number, 'DE123456789');
+  test('B2C + debtor_vat résiduel → checkFields passe',              ok, true);
+  test('B2C + debtor_vat résiduel → aucune erreur debtor',           inv.errors.debtor_vat_number, undefined);
 });
 
 suite('Risque 1b: CSV B2C ne doit pas contenir debtor_vat', ()=>{
-  // Même scénario — après checkFields, la valeur doit être null dans le CSV
+  // Valeur stockée mais masquée à l'export — la colonne ne doit pas apparaître si B2C uniquement
   const inv={data:{...baseOK,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789',debtor_code:'ACMPAR12R750'},errors:{},debtorType:'particulier',status:'validated'};
-  checkFields(inv); // doit effacer debtor_vat
-  const {header,rows}=simulateBuildCSV([inv]);
+  checkFields(inv);
+  const {header,rows,exportFields}=simulateBuildCSV([inv]);
   test('Colonne debtor_vat absente pour B2C pur',  header.includes('N° TVA débiteur'), false);
-  test('debtor_vat nul dans les données',           inv.data.debtor_vat_number, null);
+  test('Valeur toujours présente dans les données', inv.data.debtor_vat_number, 'DE123456789');
+  // Si la colonne était présente, la cellule serait vide
+  const dVatIdx=exportFields.findIndex(f=>f.key==='debtor_vat_number');
+  test('Pas de colonne debtor_vat pour B2C seul',  dVatIdx, -1);
 });
 
-suite('Risque 2: B2B→B2C→B2B — TVA débiteur perdue (comportement documenté)', ()=>{
+suite('Risque 2: B2B→B2C→B2B — TVA débiteur conservée', ()=>{
   const inv={data:{...baseOK,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'},errors:{},debtorType:'entreprise'};
   simulateSetDebtorType(inv,'particulier');
-  test('Après B2C : debtor_vat effacé',                inv.data.debtor_vat_number, null);
+  test('Après B2C : debtor_vat préservé',              inv.data.debtor_vat_number, 'DE123456789');
   simulateSetDebtorType(inv,'entreprise');
-  test('Après B2B : debtor_vat toujours null (perdu)', inv.data.debtor_vat_number, null);
-  // checkFields bloque → utilisateur doit re-saisir
-  test('B2B sans TVA après bascule : bloqué',          checkFields(inv), false);
+  test('Après B2B : debtor_vat toujours disponible',   inv.data.debtor_vat_number, 'DE123456789');
+  // checkFields passe — TVA débiteur est là
+  test('B2B avec TVA récupérée : valide',              checkFields(inv), true);
 });
 
 suite('Risque 3: clic B2C alors que Claude a détecté 2 TVA valides', ()=>{
-  // Les deux TVA sont correctement détectées → clic B2C efface debtor_vat
+  // Clic B2C grise le champ mais ne l'efface pas → pas de perte de données
   const inv={data:{...baseOK,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'},errors:{},debtorType:null};
   simulateSetDebtorType(inv,'particulier');
-  test('Click B2C efface debtor_vat (perte potentielle)', inv.data.debtor_vat_number, null);
-  test('vatState devient creditor_only après effacement', resolveVATAssignment(inv.data.creditor_vat_number,inv.data.debtor_vat_number), 'creditor_only');
-  // debtor_code bascule vers code généré
-  test('debtor_code bascule vers code généré',            computeDebtorCode(inv.data), generateDebtorCode(inv.data));
+  test('Click B2C : debtor_vat préservé (pas de perte)', inv.data.debtor_vat_number, 'DE123456789');
+  test('vatState reste both (valeur toujours là)',        resolveVATAssignment(inv.data.creditor_vat_number,inv.data.debtor_vat_number), 'both');
+  // Pour B2C, debtorType pilote la logique — le code doit être généré même si la TVA est stockée
+  test('debtor_code B2C → code généré (via debtorType)', getDebtorCodeState(inv.data,'particulier').code, generateDebtorCode(inv.data));
 });
 
-suite('Risque 4: switch + B2C — les deux TVA anéanties', ()=>{
-  // Scénario : créancier=FR, débiteur=null → switch → créancier=null, débiteur=FR → B2C → débiteur effacé
+suite('Risque 4: switch + B2C — créancier devient null', ()=>{
+  // Scénario : créancier=FR, débiteur=null → switch → créancier=null, débiteur=FR → B2C
+  // B2C ne vide plus le débiteur, mais le créancier est null → checkFields bloque
   const inv={data:{...baseOK,creditor_vat_number:'FR12345678901',debtor_vat_number:null},errors:{},debtorType:null};
   switchVATValues(inv.data); // créancier=null, débiteur=FR12345678901
-  simulateSetDebtorType(inv,'particulier'); // efface débiteur
-  test('Après switch+B2C : créancier null',  inv.data.creditor_vat_number, null);
-  test('Après switch+B2C : débiteur null',   inv.data.debtor_vat_number,   null);
+  simulateSetDebtorType(inv,'particulier'); // grise le champ, ne l'efface pas
+  test('Après switch+B2C : créancier null',           inv.data.creditor_vat_number, null);
+  test('Après switch+B2C : débiteur préservé',        inv.data.debtor_vat_number,   'FR12345678901');
   // checkFields bloque sur créancier manquant
   const ok=checkFields(inv);
-  test('checkFields bloque : créancier manquant', ok, false);
-  test('Erreur sur créancier',               !!inv.errors.creditor_vat_number, true);
+  test('checkFields bloque : créancier manquant',     ok, false);
+  test('Erreur sur créancier',                        !!inv.errors.creditor_vat_number, true);
 });
 
 suite('Risque 5: idempotence checkFields avec debtor_vat résiduel B2C', ()=>{
   const inv={data:{...baseOK,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'},errors:{},debtorType:'particulier'};
-  checkFields(inv); // premier appel : doit effacer debtor_vat
+  checkFields(inv); // premier appel : doit ignorer debtor_vat et passer
   const vatAfter1=inv.data.debtor_vat_number;
   const errAfter1=JSON.stringify(inv.errors);
   checkFields(inv); // deuxième appel : même résultat
   test('Double appel : debtor_vat identique', inv.data.debtor_vat_number, vatAfter1);
   test('Double appel : erreurs identiques',   JSON.stringify(inv.errors), errAfter1);
-  test('Valeur effacée dès le 1er appel',     vatAfter1, null);
+  test('Valeur préservée après 2 appels',     vatAfter1, 'DE123456789');
 });
 
 suite('Risque 6: CSV export contient debtor_vat d\'une facture B2B et vide pour B2C', ()=>{
-  const b2cInv={data:{...baseOK,creditor_vat_number:'FR12345678901',debtor_vat_number:null,debtor_code:'JEALYO12R690'},errors:{},debtorType:'particulier',status:'validated'};
+  // B2C a une valeur stockée (non effacée) — elle ne doit PAS apparaître dans le CSV
+  const b2cInv={data:{...baseOK,creditor_vat_number:'FR12345678901',debtor_vat_number:'IT12345678901',debtor_code:'JEALYO12R690'},errors:{},debtorType:'particulier',status:'validated'};
   const b2bInv={data:{...baseOK,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789',debtor_code:'DE123456789'},errors:{},debtorType:'entreprise',status:'validated'};
   const {header,rows,exportFields}=simulateBuildCSV([b2cInv,b2bInv]);
   const dVatIdx=exportFields.findIndex(f=>f.key==='debtor_vat_number');
-  test('Colonne debtor_vat présente (B2B la requiert)', dVatIdx>=0, true);
+  test('Colonne debtor_vat présente (B2B la requiert)',           dVatIdx>=0, true);
   const b2cRow=rows[0].split(',');
   const b2bRow=rows[1].split(',');
-  test('B2C debtor_vat = vide dans CSV',              b2cRow[dVatIdx], '');
-  test('B2B debtor_vat = DE123456789 dans CSV',       b2bRow[dVatIdx], 'DE123456789');
+  test('B2C debtor_vat = vide dans CSV (valeur masquée)',         b2cRow[dVatIdx], '');
+  test('B2B debtor_vat = DE123456789 dans CSV',                   b2bRow[dVatIdx], 'DE123456789');
+  test('Valeur IT... toujours présente dans les données B2C',     b2cInv.data.debtor_vat_number, 'IT12345678901');
 });
 
 console.log(`\n${'─'.repeat(50)}`);
