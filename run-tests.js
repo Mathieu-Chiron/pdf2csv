@@ -96,7 +96,7 @@ function buildExportWarningMessage(invoices){const skipped=getSkippedInvoices(in
 function makeInvoice(status,data={}){return{file:{name:'test.pdf'},status,data:{...data},errors:{},rawNorm:{},confidence:null};}
 function simulateOnFI(inv,key,val){inv.data[key]=val;if(inv.errors)delete inv.errors[key];if(inv.status==='skipped'||inv.status==='validated')inv.status='extracted';return inv;}
 function getButtonLabel(inv,invoices){const ad=invoices.length>0&&invoices.every(x=>x.status==='validated'||x.status==='skipped');const cv=inv.status==='validated';return(ad&&cv)?'Terminer et exporter ✓':'Valider ✓';}
-function simulatePreExportCheck(inv,invoices){const ok=checkFields(inv);if(!ok)return{blocked:true,reason:'missing_fields',errors:inv.errors};const skipped=invoices.filter(x=>x.status==='skipped');if(skipped.length)return{blocked:true,reason:'skipped_warning',skipped:skipped.map(x=>x.file.name)};return{blocked:false};}
+function simulatePreExportCheck(inv,invoices){if(inv.status!=='skipped'){const ok=checkFields(inv);if(!ok)return{blocked:true,reason:'missing_fields',errors:inv.errors};}const skipped=invoices.filter(x=>x.status==='skipped');if(skipped.length)return{blocked:true,reason:'skipped_warning',skipped:skipped.map(x=>x.file.name)};return{blocked:false};}
 
 const inv  = name=>({file:{name},status:'validated'});
 const skip = name=>({file:{name},status:'skipped'});
@@ -685,6 +685,90 @@ suite('checkFields: TVA créancier toujours obligatoire', ()=>{
   const i4={data:{...base,creditor_vat_number:'',debtor_vat_number:'DE123456789'},errors:{},debtorType:null};
   checkFields(i4);
   test('TVA créancier vide + débiteur présent → erreur créancier', !!i4.errors.creditor_vat_number, true);
+});
+
+/* ══ RISK: TVA créancier toujours obligatoire ════════════ */
+
+const baseOK={debtor_company_name:'ACME SAS',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-001',invoice_date:'2024-03-15',invoice_due_date:'2024-04-15',amount_ttc:'1500',invoice_total_amount_inc_vat:'1500',invoice_open_amount_inc_vat:'250'};
+
+suite('Risque: switch laisse créancier null → hint UI disponible', ()=>{
+  // Avant switch: créancier valide, débiteur null
+  const d={creditor_vat_number:'FR12345678901',debtor_vat_number:null};
+  switchVATValues(d);
+  // Après switch: créancier=null, débiteur=FR12345678901 → vatState=debtor_only
+  test('Après switch : vatState = debtor_only',          resolveVATAssignment(d.creditor_vat_number,d.debtor_vat_number), 'debtor_only');
+  // checkFields bloque (créancier toujours requis)
+  const inv={data:{...baseOK,...d},errors:{},debtorType:null};
+  const ok=checkFields(inv);
+  test('Après switch créancier→null : bloqué',           ok, false);
+  test('Après switch créancier→null : erreur créancier', !!inv.errors.creditor_vat_number, true);
+  // Le hint doit être affiché (creditor null, debtor valide) — condition UI vérifiée
+  const shouldShowHint=(!d.creditor_vat_number && !!d.debtor_vat_number);
+  test('Condition hint active quand créancier null + débiteur valide', shouldShowHint, true);
+  // Un re-switch corrige la situation
+  switchVATValues(d);
+  test('Re-switch corrige : créancier restauré',         d.creditor_vat_number, 'FR12345678901');
+  test('Re-switch corrige : débiteur redevient null',    d.debtor_vat_number,   null);
+  const inv2={data:{...baseOK,...d},errors:{},debtorType:'particulier'};
+  test('Après re-switch : checkFields passe',            checkFields(inv2), true);
+});
+
+suite('Risque: facture sans TVA du tout (auto-entrepreneur) → blocage', ()=>{
+  const inv={data:{...baseOK,creditor_vat_number:null,debtor_vat_number:null},errors:{},debtorType:'particulier'};
+  const ok=checkFields(inv);
+  test('Facture sans TVA → bloquée',                    ok,  false);
+  test('Facture sans TVA → message d\'erreur créancier', typeof inv.errors.creditor_vat_number, 'string');
+  // Pas d'erreur sur le débiteur (il n'est pas requis ici)
+  test('Facture sans TVA + particulier → pas d\'erreur débiteur', inv.errors.debtor_vat_number, undefined);
+});
+
+suite('Risque: re-extraction efface la TVA créancier saisie manuellement', ()=>{
+  // Utilisateur a saisi manuellement FR12345678901
+  const inv={data:{...baseOK,creditor_vat_number:'FR12345678901',debtor_vat_number:null},errors:{},debtorType:null};
+  checkFields(inv);
+  const okBefore=!inv.errors.creditor_vat_number;
+  // Re-extraction: Claude ne trouve plus de TVA créancier
+  Object.assign(inv.data,{creditor_vat_number:null,debtor_vat_number:null});
+  inv.errors={};
+  const okAfter=checkFields(inv);
+  test('Avant re-extraction : valide',                  okBefore, true);
+  test('Après re-extraction sans TVA : bloqué',         okAfter,  false);
+  test('Après re-extraction : erreur créancier',        !!inv.errors.creditor_vat_number, true);
+});
+
+suite('Risque: vatState calculé sur valeur non-normalisée (créancier invalide)', ()=>{
+  // Créancier invalide (raw) + débiteur valide
+  // On s'assure que le débiteur est quand même évalué
+  const inv={data:{...baseOK,creditor_vat_number:'INVALID',debtor_vat_number:'DE123456789'},errors:{},debtorType:null};
+  checkFields(inv);
+  // Créancier doit être en erreur
+  test('Créancier invalide → erreur créancier',         !!inv.errors.creditor_vat_number, true);
+  // Débiteur valide doit être normalisé (pas d'erreur débiteur)
+  test('Débiteur valide avec créancier invalide → pas d\'erreur débiteur', inv.errors.debtor_vat_number, undefined);
+  test('Débiteur normalisé malgré créancier invalide',  inv.data.debtor_vat_number, 'DE123456789');
+});
+
+suite('Risque: facture ignorée ne bloque plus le pre-export (fix)', ()=>{
+  // Les factures ignorées sont exclues de l'export — elles ne doivent pas bloquer le pre-export
+  const skipped={data:{...baseOK,creditor_vat_number:null,debtor_vat_number:null},errors:{},debtorType:null,status:'skipped'};
+  const result=simulatePreExportCheck(skipped,[makeInvoice('validated',fullData)]);
+  test('Facture ignorée sans TVA créancier → ne bloque pas',      result.blocked, false);
+  // Avec d'autres factures ignorées dans la liste → warning skipped (pas missing_fields)
+  const result2=simulatePreExportCheck(skipped,[makeInvoice('skipped',{}),makeInvoice('validated',fullData)]);
+  test('Facture ignorée courante + liste ignorées → skipped_warning', result2.reason, 'skipped_warning');
+});
+
+suite('Risque: checkFields idempotent (double appel sans corruption)', ()=>{
+  const inv={data:{...baseOK,creditor_vat_number:'FR12345678901',debtor_vat_number:null},errors:{},debtorType:'particulier'};
+  checkFields(inv);
+  const errorsAfter1=JSON.stringify(inv.errors);
+  const ok1=!inv.errors.creditor_vat_number;
+  checkFields(inv);
+  const errorsAfter2=JSON.stringify(inv.errors);
+  const ok2=!inv.errors.creditor_vat_number;
+  test('Double appel : même résultat',     ok1===ok2,         true);
+  test('Double appel : mêmes erreurs',     errorsAfter1,      errorsAfter2);
+  test('TVA créancier non altérée',        inv.data.creditor_vat_number, 'FR12345678901');
 });
 
 /* ══ RESULTS ══ */

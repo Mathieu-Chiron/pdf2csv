@@ -700,6 +700,12 @@ function renderDebtorSection(inv,container){
 
   // — TVA créancier : toujours visible et obligatoire —
   section.appendChild(mkVatField('creditor_vat_number','N° TVA créancier',creditor,true));
+  // Hint quand le créancier est vide mais le débiteur a une TVA (après un mauvais switch)
+  if(!creditor&&debtor){
+    const hint=document.createElement('div');hint.className='field-err';hint.style.marginBottom='4px';
+    hint.textContent='⚠ La TVA détectée est attribuée au débiteur — utilisez ⇄ pour corriger l\'attribution.';
+    section.appendChild(hint);
+  }
 
   // — TVA débiteur : conditionnelle —
   const showDebtorField=vatState==='both'||vatState==='debtor_only'||state.showDebtorVatField;
@@ -1027,7 +1033,7 @@ function renderNomPrev(){
 function preExportCheck(){
   if(S.cur>=0){
     const inv=S.invoices[S.cur];
-    if(!checkFields(inv)){selectInv(S.cur);return;}
+    if(inv.status!=='skipped'&&!checkFields(inv)){selectInv(S.cur);return;}
   }
   const skipped=S.invoices.filter(x=>x.status==='skipped');
   if(!skipped.length){showExport();return;}
