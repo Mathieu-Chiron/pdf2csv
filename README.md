@@ -46,6 +46,29 @@ The `debtor_code` field is a unique identifier used to match each debtor in a pa
 
   Special characters, spaces, and accents are stripped before extraction. If a field is shorter than 3 characters, it is padded with `X`. The code updates automatically whenever any of the four source fields is edited.
 
+## Known risks & edge cases
+
+### B2C / B2B field greying
+
+| Risk | Status | Notes |
+|---|---|---|
+| Re-extraction repopulates `debtor_vat_number` on a B2C invoice | **Fixed** | `checkFields` always clears `debtor_vat_number` when `debtorType = particulier`, regardless of how the value got there |
+| Stale `debtor_vat_number` exported to CSV for a B2C invoice | **Fixed** | Same fix — value is null before export runs |
+| `checkFields` idempotency broken by stale B2C debtor VAT | **Fixed** | Same fix ensures consistent state across multiple calls |
+| B2B → B2C → B2B: debtor VAT permanently lost | Documented | Clicking B2C clears the debtor VAT; switching back to B2B requires the user to re-enter it manually |
+| Clicking B2C discards a correctly-detected debtor VAT | Documented | User-initiated; the type selector is a deliberate override of the AI extraction |
+| Switch + B2C: all VAT data wiped | Documented | If the creditor VAT was moved to the debtor side via the switch button, then B2C is clicked, both sides end up null. `checkFields` blocks on the missing creditor VAT. |
+
+### CSV extraction
+
+| Risk | Status | Notes |
+|---|---|---|
+| Skipped invoice with debtor VAT creates empty column in CSV | **Fixed** | `activeVAT` column detection now scans validated invoices only |
+| Field values containing newlines break CSV row structure | **Fixed** | Newlines (`\n`, `\r\n`) are replaced with a space before export |
+| Skipped invoices blocking pre-export VAT check | **Fixed** | `preExportCheck` skips `checkFields` for skipped invoices |
+| After a VAT switch, creditor becomes null and invoice is permanently blocked | Documented | Switch button remains visible; a hint message guides the user to switch back |
+| Invoices with no VAT at all (auto-entrepreneur) are blocked | Documented | User must enter the creditor VAT manually — it is always required |
+
 ## Tech stack
 
 - Single-page HTML/CSS/JS app — no build step required
