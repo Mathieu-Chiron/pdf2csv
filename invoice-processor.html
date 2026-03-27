@@ -326,9 +326,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <div class="exp-stats" id="expStats"></div>
     <div class="exp-table-wrap"><table class="exp-table" id="expTable"><thead></thead><tbody></tbody></table></div>
     <div class="exp-actions">
-      <button class="btn btn-p" onclick="exportCSV()">Télécharger CSV</button>
       <button class="btn btn-p" onclick="exportZIP()">Télécharger ZIP</button>
-      <button class="btn" onclick="restart()">Nouvelle session</button>
+      <button class="btn" onclick="confirmRestart()">Nouvelle session</button>
     </div>
   </div>
 </div>
@@ -382,6 +381,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <div class="modal-foot">
       <button class="btn" onclick="closeSkipWarn()">Annuler et modifier</button>
       <button class="btn btn-p" onclick="closeSkipWarnAndExport()">Procéder et exporter</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ RESTART CONFIRM ══════════════════════════════ -->
+<div class="modal-bg" id="restartWarnBg">
+  <div class="modal" onclick="event.stopPropagation()" style="max-width:420px;">
+    <div class="modal-title">Nouvelle session</div>
+    <div class="modal-sub">Vous n'avez pas encore téléchargé le fichier ZIP. Toutes les données de la session en cours seront perdues.</div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeRestartWarn()">Annuler</button>
+      <button class="btn btn-p" style="background:var(--red);border-color:var(--red);" onclick="doRestart()">Quitter sans télécharger</button>
     </div>
   </div>
 </div>
@@ -532,7 +543,7 @@ const S = {
     {label:'Montant en suspens', key:'invoice_open_amount_inc_vat',  type:'number', required:true},
   ],
   nomenclature:['debtor_company_name','invoice_number'], nomSep:'_',
-  files:[], invoices:[], cur:-1, busy:false,
+  files:[], invoices:[], cur:-1, busy:false, zipDownloaded:false,
 };
 
 /* ══ UPLOAD ══════════════════════════════════════════ */
@@ -944,14 +955,18 @@ function showExport(){
   const activeVAT=VAT_FIELDS.filter(f=>val.some(inv=>inv.data[f.key]));
   const exportFields=[...S.fields,...activeVAT,{key:'debtor_code',label:'Code débiteur'}];
   const thead=document.querySelector('#expTable thead'),tbody=document.querySelector('#expTable tbody');
-  thead.innerHTML='<tr>'+['Fichier',...exportFields.map(f=>f.label),'Statut'].map(h=>`<th>${esc(h)}</th>`).join('')+'</tr>';
+  thead.innerHTML='<tr>'+['#','Statut','Type','Fichier',...exportFields.map(f=>f.label)].map(h=>`<th>${esc(h)}</th>`).join('')+'</tr>';
   tbody.innerHTML='';
-  S.invoices.forEach(inv=>{
+  S.invoices.forEach((inv,idx)=>{
     const tr=document.createElement('tr');
     if(inv.status==='validated') tr.style.cssText='background:var(--teal-bg);';
-    tr.innerHTML=`<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(inv.file.name)}</td>`
-      +exportFields.map(f=>`<td>${esc(String(inv.data[f.key]??'—'))}</td>`).join('')
-      +`<td><span class="badge ${inv.status==='validated'?'b-ok':'b-warn'}">${inv.status==='validated'?'Validée':'Ignorée'}</span></td>`;
+    const statusBadge=`<span class="badge ${inv.status==='validated'?'b-ok':'b-warn'}">${inv.status==='validated'?'Validée':'Ignorée'}</span>`;
+    const typeLabel=inv.debtorType==='entreprise'?'B2B':inv.debtorType==='particulier'?'B2C':'—';
+    tr.innerHTML=`<td style="color:var(--text2);font-size:11px;">${idx+1}</td>`
+      +`<td>${statusBadge}</td>`
+      +`<td style="font-size:11px;">${esc(typeLabel)}</td>`
+      +`<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(inv.file.name)}</td>`
+      +exportFields.map(f=>`<td>${esc(String(inv.data[f.key]??'—'))}</td>`).join('');
     tbody.appendChild(tr);
   });
   document.getElementById('screen-export').classList.add('show');
@@ -974,9 +989,15 @@ async function exportZIP(){
   z.file('factures.csv','\uFEFF'+buildCSV());
   for(const inv of S.invoices.filter(i=>i.status==='validated')) z.file(getPdfFilename(inv),await inv.file.arrayBuffer());
   dlBlob(await z.generateAsync({type:'blob'}),'factures_export.zip');
+  S.zipDownloaded=true;
 }
 function dlBlob(b,n){const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=n;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
-function restart(){S.files=[];S.invoices=[];S.cur=-1;S.busy=false;hideExport();document.getElementById('screen-main').classList.remove('in');document.getElementById('screen-upload').style.display='';setTimeout(()=>document.getElementById('screen-upload').classList.remove('out'),10);}
+function confirmRestart(){
+  if(!S.zipDownloaded){document.getElementById('restartWarnBg').classList.add('show');return;}
+  doRestart();
+}
+function closeRestartWarn(){document.getElementById('restartWarnBg').classList.remove('show');}
+function doRestart(){closeRestartWarn();S.files=[];S.invoices=[];S.cur=-1;S.busy=false;S.zipDownloaded=false;hideExport();document.getElementById('screen-main').classList.remove('in');document.getElementById('screen-upload').style.display='';setTimeout(()=>document.getElementById('screen-upload').classList.remove('out'),10);}
 
 /* ══ MODAL ═══════════════════════════════════════════ */
 function openModal(){
