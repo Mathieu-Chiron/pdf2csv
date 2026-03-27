@@ -70,6 +70,19 @@ const FIELDS = [
 function checkFields(inv) {
   inv.errors={}; let ok=true;
   FIELDS.forEach(f=>{ const v=inv.data[f.key],res=vandn(v,f); if(!res.valid){inv.errors[f.key]=res.errs[0];ok=false;} else if(res.norm!==v&&res.norm!=null) inv.data[f.key]=res.norm; });
+  // Creditor VAT always required
+  const nc=normalizeVAT(inv.data.creditor_vat_number);
+  if(!nc){inv.errors.creditor_vat_number='N° TVA créancier obligatoire';ok=false;}
+  else inv.data.creditor_vat_number=nc;
+  // Debtor VAT conditional
+  const vatState=resolveVATAssignment(inv.data.creditor_vat_number,inv.data.debtor_vat_number);
+  if(vatState==='both'||vatState==='debtor_only'){
+    const nd=normalizeVAT(inv.data.debtor_vat_number);
+    if(!nd){inv.errors.debtor_vat_number='N° TVA débiteur invalide';ok=false;}
+    else inv.data.debtor_vat_number=nd;
+  }
+  const state=getDebtorCodeState(inv.data,inv.debtorType||null);
+  if(state.vatRequired){inv.errors.debtor_vat_number='N° TVA débiteur obligatoire pour une entreprise';ok=false;}
   return ok;
 }
 function simulateValidation(data,fields){const errors={};let ok=true;fields.forEach(f=>{const v=data[f.key],res=vandn(v,f);if(!res.valid){errors[f.key]=res.errs[0];ok=false;}});return{ok,errors};}
@@ -94,7 +107,8 @@ const fullData = {
   debtor_company_name:'ACME SAS',debtor_post_street_1:'12 rue de la Paix',
   debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',
   invoice_number:'F-2024-001',invoice_date:'2024-03-15',invoice_due_date:'2024-04-15',
-  amount_ttc:'1500.50',invoice_total_amount_inc_vat:'1500.50',invoice_open_amount_inc_vat:'250.00'
+  amount_ttc:'1500.50',invoice_total_amount_inc_vat:'1500.50',invoice_open_amount_inc_vat:'250.00',
+  creditor_vat_number:'FR12345678901'
 };
 
 /* ══ VAT VALIDATION ══════════════════════════════════ */
@@ -651,6 +665,26 @@ suite('Validation: blocage si entreprise sans TVA débiteur', ()=>{
   test('Aucune+entreprise → bloqué',              getDebtorCodeState(withNoVAT,'entreprise').vatRequired, true);
   test('Aucune+particulier → libre',              getDebtorCodeState(withNoVAT,'particulier').vatRequired, false);
   test('2 TVA → toujours libre',                  getDebtorCodeState(withBothVAT,'entreprise').vatRequired, false);
+});
+
+suite('checkFields: TVA créancier toujours obligatoire', ()=>{
+  const base={debtor_company_name:'ACME SAS',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-001',invoice_date:'2024-03-15',invoice_due_date:'2024-04-15',amount_ttc:'1500',invoice_total_amount_inc_vat:'1500',invoice_open_amount_inc_vat:'250'};
+  // Sans TVA créancier → bloqué
+  const i1={data:{...base,creditor_vat_number:null,debtor_vat_number:null},errors:{},debtorType:null};
+  checkFields(i1);
+  test('Sans TVA créancier → erreur',     !!i1.errors.creditor_vat_number, true);
+  test('Sans TVA créancier → bloqué',     checkFields({data:{...base,creditor_vat_number:null,debtor_vat_number:null},errors:{},debtorType:null}), false);
+  // Avec TVA créancier valide → OK
+  const i2={data:{...base,creditor_vat_number:'FR12345678901',debtor_vat_number:null},errors:{},debtorType:'particulier'};
+  test('Avec TVA créancier valide → pas d\'erreur créancier', (()=>{checkFields(i2);return !i2.errors.creditor_vat_number;})(), true);
+  // TVA créancier normalisée
+  const i3={data:{...base,creditor_vat_number:'fr 123 456 789 01',debtor_vat_number:null},errors:{},debtorType:'particulier'};
+  checkFields(i3);
+  test('TVA créancier normalisée',        i3.data.creditor_vat_number, 'FR12345678901');
+  // Erreur même si TVA débiteur présente mais créancier absente
+  const i4={data:{...base,creditor_vat_number:'',debtor_vat_number:'DE123456789'},errors:{},debtorType:null};
+  checkFields(i4);
+  test('TVA créancier vide + débiteur présent → erreur créancier', !!i4.errors.creditor_vat_number, true);
 });
 
 /* ══ RESULTS ══ */

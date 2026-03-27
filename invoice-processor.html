@@ -698,38 +698,25 @@ function renderDebtorSection(inv,container){
     return btn;
   };
 
-  // — Champs TVA —
-  if(vatState==='both'){
+  // — TVA créancier : toujours visible et obligatoire —
+  section.appendChild(mkVatField('creditor_vat_number','N° TVA créancier',creditor,true));
+
+  // — TVA débiteur : conditionnelle —
+  const showDebtorField=vatState==='both'||vatState==='debtor_only'||state.showDebtorVatField;
+  if(showDebtorField){
     if(hasDuplicateVAT(creditor,debtor)){
       const warn=document.createElement('div');warn.className='field-err';warn.style.marginBottom='8px';
       warn.textContent='⚠ Les deux numéros TVA sont identiques — vérifiez l\'attribution.';
       section.appendChild(warn);
     }
-    section.appendChild(mkVatField('creditor_vat_number','N° TVA créancier',creditor,true));
     section.appendChild(mkSwitchBtn());
-    section.appendChild(mkVatField('debtor_vat_number','N° TVA débiteur',debtor,true));
-  } else if(vatState==='debtor_only'){
-    section.appendChild(mkVatField('creditor_vat_number','N° TVA créancier',creditor,false));
-    section.appendChild(mkSwitchBtn());
-    section.appendChild(mkVatField('debtor_vat_number','N° TVA débiteur',debtor,true));
-  } else if(vatState==='creditor_only'){
-    section.appendChild(mkVatField('creditor_vat_number','N° TVA créancier',creditor,true));
-    if(state.showDebtorVatField){
-      section.appendChild(mkSwitchBtn());
-      if(state.vatRequired){
-        const warn=document.createElement('div');warn.className='debtor-vat-warn';
-        warn.textContent='⚠ Le N° TVA du débiteur est obligatoire pour valider cette facture.';
-        section.appendChild(warn);
-      }
-      section.appendChild(mkVatField('debtor_vat_number','N° TVA débiteur',debtor,state.vatRequired));
-    }
-  } else if(vatState==='none' && state.showDebtorVatField){
     if(state.vatRequired){
       const warn=document.createElement('div');warn.className='debtor-vat-warn';
       warn.textContent='⚠ Le N° TVA du débiteur est obligatoire pour valider cette facture.';
       section.appendChild(warn);
     }
-    section.appendChild(mkVatField('debtor_vat_number','N° TVA débiteur',debtor,state.vatRequired));
+    const debtorRequired=vatState==='both'||vatState==='debtor_only'||state.vatRequired;
+    section.appendChild(mkVatField('debtor_vat_number','N° TVA débiteur',debtor,debtorRequired));
   }
 
   // — Code débiteur : masqué si entreprise (toujours calculé/exporté) —
@@ -888,16 +875,16 @@ function checkFields(inv){
     if(!res.valid){inv.errors[f.key]=res.errs[0];ok=false;}
     else if(res.norm!==v&&res.norm!=null) inv.data[f.key]=res.norm;
   });
+  // Creditor VAT always required
+  const nc=normalizeVAT(inv.data.creditor_vat_number);
+  if(!nc){inv.errors.creditor_vat_number='N° TVA créancier obligatoire';ok=false;}
+  else inv.data.creditor_vat_number=nc;
+  // Debtor VAT conditional
   const vatState=resolveVATAssignment(inv.data.creditor_vat_number,inv.data.debtor_vat_number);
-  if(vatState==='both'||vatState==='creditor_only'){
-    const n=normalizeVAT(inv.data.creditor_vat_number);
-    if(!n){inv.errors.creditor_vat_number='N° TVA créancier invalide';ok=false;}
-    else inv.data.creditor_vat_number=n;
-  }
   if(vatState==='both'||vatState==='debtor_only'){
-    const n=normalizeVAT(inv.data.debtor_vat_number);
-    if(!n){inv.errors.debtor_vat_number='N° TVA débiteur invalide';ok=false;}
-    else inv.data.debtor_vat_number=n;
+    const nd=normalizeVAT(inv.data.debtor_vat_number);
+    if(!nd){inv.errors.debtor_vat_number='N° TVA débiteur invalide';ok=false;}
+    else inv.data.debtor_vat_number=nd;
   }
   const state=getDebtorCodeState(inv.data,inv.debtorType||null);
   if(state.vatRequired){inv.errors.debtor_vat_number='N° TVA débiteur obligatoire pour une entreprise';ok=false;}
