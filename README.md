@@ -28,6 +28,24 @@ A web application that extracts structured data from PDF invoices using Claude A
 7. **Repeat** for each invoice in the list.
 8. **Export** — when all invoices are either validated or skipped, the **Terminer et exporter** button becomes available. Click it to download the CSV file.
 
+## PAYT logic
+
+The `debtor_code` field is a unique identifier used to match each debtor in a payment tracking system.
+
+- **B2B debtor (Entreprise)** — the `debtor_code` is equal to the debtor's VAT number. Since a VAT number is mandatory for a business debtor, it is always present and serves as the canonical identifier. The `debtor_vat_number` and `debtor_code` columns in the CSV will hold the same value.
+
+- **B2C debtor (Particulier)** — the debtor has no VAT number. The `debtor_vat_number` column is empty in the CSV. Instead, a 12-character code is automatically generated from four of the debtor's address fields, taking the **first 3 alphanumeric characters** of each:
+
+  | Source field | Example value | Contribution |
+  |---|---|---|
+  | Company / full name | `Jean Dupont` | `JEA` |
+  | City | `Lyon` | `LYO` |
+  | Street address | `12 rue des Lilas` | `12R` |
+  | Postal code | `69001` | `690` |
+  | **→ debtor_code** | | **`JEALYO12R690`** |
+
+  Special characters, spaces, and accents are stripped before extraction. If a field is shorter than 3 characters, it is padded with `X`. The code updates automatically whenever any of the four source fields is edited.
+
 ## Tech stack
 
 - Single-page HTML/CSS/JS app — no build step required

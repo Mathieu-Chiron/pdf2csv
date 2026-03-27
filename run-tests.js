@@ -772,6 +772,117 @@ suite('Risque: checkFields idempotent (double appel sans corruption)', ()=>{
 });
 
 /* ══ RESULTS ══ */
+/* ══ B2B / B2C CSV LOGIC ═════════════════════════════ */
+
+// Helper: builds CSV rows the same way buildCSV does in the app
+const VAT_FIELDS_SIM=[{key:'creditor_vat_number',label:'N° TVA créancier'},{key:'debtor_vat_number',label:'N° TVA débiteur'}];
+function simulateBuildCSV(invoices){
+  const activeVAT=getActiveVATFields(invoices,VAT_FIELDS_SIM);
+  const exportFields=[...FIELDS,...activeVAT,{key:'debtor_code',label:'Code débiteur'}];
+  const header=exportFields.map(f=>f.label).join(',');
+  const rows=invoices.map(inv=>exportFields.map(f=>String(inv.data[f.key]??'')).join(','));
+  return{header,rows,exportFields,csv:[header,...rows].join('\n')};
+}
+
+// ── Placeholder data ──────────────────────────────────
+const b2cRaw={
+  debtor_company_name:'Jean Dupont',debtor_post_street_1:'12 rue des Lilas',
+  debtor_post_postalcode:'69001',debtor_post_city:'Lyon',debtor_post_country_code:'France',
+  invoice_number:'F-2024-042',invoice_date:'2024-06-01',invoice_due_date:'2024-07-01',
+  amount_ttc:250,invoice_total_amount_inc_vat:250,invoice_open_amount_inc_vat:250,
+  creditor_vat_number:'FR12345678901',debtor_vat_number:null
+};
+const b2cData={...b2cRaw,debtor_code:computeDebtorCode(b2cRaw)};
+
+const b2bRaw={
+  debtor_company_name:'ACME SAS',debtor_post_street_1:'5 avenue de la République',
+  debtor_post_postalcode:'75011',debtor_post_city:'Paris',debtor_post_country_code:'France',
+  invoice_number:'F-2024-043',invoice_date:'2024-06-02',invoice_due_date:'2024-07-02',
+  amount_ttc:1200,invoice_total_amount_inc_vat:1200,invoice_open_amount_inc_vat:1200,
+  creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'
+};
+const b2bData={...b2bRaw,debtor_code:computeDebtorCode(b2bRaw)};
+
+// ── B2B logic ─────────────────────────────────────────
+suite('B2B: debtor_code = debtor_vat_number', ()=>{
+  const state=getDebtorCodeState(b2bRaw,'entreprise');
+  test('B2B debtor_code = TVA débiteur',       state.code,         'DE123456789');
+  test('B2B vatRequired = false (TVA connue)', state.vatRequired,  false);
+  test('B2B computeDebtorCode = TVA débiteur', computeDebtorCode(b2bRaw), 'DE123456789');
+  test('B2B debtor_code === debtor_vat_number', b2bData.debtor_code===b2bData.debtor_vat_number, true);
+});
+
+suite('B2B: entreprise sans TVA débiteur → bloqué', ()=>{
+  const noVat={...b2bRaw,debtor_vat_number:null};
+  const state=getDebtorCodeState(noVat,'entreprise');
+  test('Sans TVA débiteur → vatRequired',      state.vatRequired,  true);
+  test('Sans TVA débiteur → code généré (non utilisé)', typeof state.code, 'string');
+  // checkFields bloque
+  const inv={data:{...noVat},errors:{},debtorType:'entreprise'};
+  test('checkFields bloque B2B sans TVA',      checkFields(inv),   false);
+  test('Erreur sur debtor_vat_number',         !!inv.errors.debtor_vat_number, true);
+});
+
+// ── B2C logic ─────────────────────────────────────────
+suite('B2C: debtor_vat_number vide, debtor_code généré', ()=>{
+  const state=getDebtorCodeState(b2cRaw,'particulier');
+  test('B2C vatRequired = false',              state.vatRequired,  false);
+  test('B2C debtor_vat_number = null',         b2cData.debtor_vat_number, null);
+  test('B2C debtor_code = code généré',        b2cData.debtor_code, generateDebtorCode(b2cRaw));
+  test('B2C debtor_code ≠ debtor_vat_number',  b2cData.debtor_code!==b2cData.debtor_vat_number, true);
+  test('B2C debtor_code longueur = 12',        b2cData.debtor_code.length, 12);
+  // checkFields passe (TVA débiteur non requise)
+  const inv={data:{...b2cRaw},errors:{},debtorType:'particulier'};
+  test('checkFields passe pour B2C',           checkFields(inv), true);
+});
+
+// ── Simulation CSV B2C seul ───────────────────────────
+suite('CSV simulation — B2C seul', ()=>{
+  const {header,rows,exportFields}=simulateBuildCSV([{data:b2cData,status:'validated'}]);
+  test('Colonne creditor_vat présente',        header.includes('N° TVA créancier'), true);
+  // Pas de colonne debtor_vat (aucune facture n'en a)
+  test('Colonne debtor_vat absente (B2C pur)', header.includes('N° TVA débiteur'),  false);
+  test('Colonne debtor_code présente',         header.includes('Code débiteur'),    true);
+  const row=rows[0].split(',');
+  const codeIdx=exportFields.findIndex(f=>f.key==='debtor_code');
+  test('debtor_code = code généré dans CSV',   row[codeIdx], b2cData.debtor_code);
+  const vatIdx=exportFields.findIndex(f=>f.key==='creditor_vat_number');
+  test('creditor_vat = FR12345678901 dans CSV', row[vatIdx], 'FR12345678901');
+  console.log('\n  [CSV B2C]\n  '+header+'\n  '+rows[0]);
+});
+
+// ── Simulation CSV B2B seul ───────────────────────────
+suite('CSV simulation — B2B seul', ()=>{
+  const {header,rows,exportFields}=simulateBuildCSV([{data:b2bData,status:'validated'}]);
+  test('Colonne creditor_vat présente',        header.includes('N° TVA créancier'), true);
+  test('Colonne debtor_vat présente (B2B)',    header.includes('N° TVA débiteur'),  true);
+  test('Colonne debtor_code présente',         header.includes('Code débiteur'),    true);
+  const row=rows[0].split(',');
+  const codeIdx=exportFields.findIndex(f=>f.key==='debtor_code');
+  const debtorVatIdx=exportFields.findIndex(f=>f.key==='debtor_vat_number');
+  test('debtor_code = DE123456789 dans CSV',   row[codeIdx], 'DE123456789');
+  test('debtor_vat = DE123456789 dans CSV',    row[debtorVatIdx], 'DE123456789');
+  test('debtor_code = debtor_vat dans CSV',    row[codeIdx]===row[debtorVatIdx], true);
+  console.log('\n  [CSV B2B]\n  '+header+'\n  '+rows[0]);
+});
+
+// ── Simulation CSV mixte B2C + B2B ───────────────────
+suite('CSV simulation — mix B2C + B2B', ()=>{
+  const {header,rows,exportFields}=simulateBuildCSV([{data:b2cData,status:'validated'},{data:b2bData,status:'validated'}]);
+  test('Mix: colonne debtor_vat présente',     header.includes('N° TVA débiteur'), true);
+  const debtorVatIdx=exportFields.findIndex(f=>f.key==='debtor_vat_number');
+  const codeIdx=exportFields.findIndex(f=>f.key==='debtor_code');
+  // Ligne B2C : debtor_vat vide
+  const b2cRow=rows[0].split(',');
+  test('Mix: B2C debtor_vat = vide',           b2cRow[debtorVatIdx], '');
+  test('Mix: B2C debtor_code = généré',        b2cRow[codeIdx], b2cData.debtor_code);
+  // Ligne B2B : debtor_vat et debtor_code identiques
+  const b2bRow=rows[1].split(',');
+  test('Mix: B2B debtor_vat = DE123456789',    b2bRow[debtorVatIdx], 'DE123456789');
+  test('Mix: B2B debtor_code = debtor_vat',    b2bRow[codeIdx], b2bRow[debtorVatIdx]);
+  console.log('\n  [CSV MIXTE]\n  '+header+'\n  '+rows[0]+'\n  '+rows[1]);
+});
+
 console.log(`\n${'─'.repeat(50)}`);
 console.log(`✓ ${pass} passed   ${fail>0?'✗ '+fail+' failed':''}`);
 console.log('─'.repeat(50));
