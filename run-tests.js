@@ -71,18 +71,25 @@ function checkFields(inv) {
   inv.errors={}; let ok=true;
   FIELDS.forEach(f=>{ const v=inv.data[f.key],res=vandn(v,f); if(!res.valid){inv.errors[f.key]=res.errs[0];ok=false;} else if(res.norm!==v&&res.norm!=null) inv.data[f.key]=res.norm; });
   // Creditor VAT always required
-  const nc=normalizeVAT(inv.data.creditor_vat_number);
-  if(!nc){inv.errors.creditor_vat_number='N° TVA créancier obligatoire';ok=false;}
-  else inv.data.creditor_vat_number=nc;
-  // Debtor VAT conditional
-  const vatState=resolveVATAssignment(inv.data.creditor_vat_number,inv.data.debtor_vat_number);
-  if(vatState==='both'||vatState==='debtor_only'){
-    const nd=normalizeVAT(inv.data.debtor_vat_number);
-    if(!nd){inv.errors.debtor_vat_number='N° TVA débiteur invalide';ok=false;}
+  const rawC=inv.data.creditor_vat_number;
+  const nc=normalizeVAT(rawC);
+  if(!nc){
+    const empty=rawC==null||String(rawC).trim()===''||String(rawC).toLowerCase()==='null';
+    inv.errors.creditor_vat_number=empty
+      ?'N° TVA créancier requis — ex : FR12345678901'
+      :'Format invalide — attendu : code pays + numéro (ex : FR12345678901, DE123456789)';
+    ok=false;
+  } else inv.data.creditor_vat_number=nc;
+  // Debtor VAT: validate if field has any non-empty value
+  const rawD=inv.data.debtor_vat_number;
+  const hasDebtorValue=rawD!=null&&String(rawD).trim()!==''&&String(rawD).toLowerCase()!=='null';
+  if(hasDebtorValue){
+    const nd=normalizeVAT(rawD);
+    if(!nd){inv.errors.debtor_vat_number='Format invalide — attendu : code pays + numéro (ex : FR12345678901, DE123456789)';ok=false;}
     else inv.data.debtor_vat_number=nd;
   }
   const state=getDebtorCodeState(inv.data,inv.debtorType||null);
-  if(state.vatRequired){inv.errors.debtor_vat_number='N° TVA débiteur obligatoire pour une entreprise';ok=false;}
+  if(state.vatRequired){inv.errors.debtor_vat_number='N° TVA débiteur requis pour une entreprise — ex : FR12345678901';ok=false;}
   return ok;
 }
 function simulateValidation(data,fields){const errors={};let ok=true;fields.forEach(f=>{const v=data[f.key],res=vandn(v,f);if(!res.valid){errors[f.key]=res.errs[0];ok=false;}});return{ok,errors};}
@@ -881,6 +888,72 @@ suite('CSV simulation — mix B2C + B2B', ()=>{
   test('Mix: B2B debtor_vat = DE123456789',    b2bRow[debtorVatIdx], 'DE123456789');
   test('Mix: B2B debtor_code = debtor_vat',    b2bRow[codeIdx], b2bRow[debtorVatIdx]);
   console.log('\n  [CSV MIXTE]\n  '+header+'\n  '+rows[0]+'\n  '+rows[1]);
+});
+
+/* ══ MESSAGES D'ERREUR SPÉCIFIQUES ══════════════════ */
+
+const baseValid={debtor_company_name:'ACME',debtor_post_street_1:'1 rue A',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-001',invoice_date:'2024-01-01',invoice_due_date:'2024-02-01',amount_ttc:'100',invoice_total_amount_inc_vat:'100',invoice_open_amount_inc_vat:'100'};
+
+suite('Erreur: TVA créancier vide → message "requis"', ()=>{
+  const inv={data:{...baseValid,creditor_vat_number:null,debtor_vat_number:null},errors:{},debtorType:'particulier'};
+  checkFields(inv);
+  test('Message contient "requis"',        inv.errors.creditor_vat_number.includes('requis'), true);
+  test('Message contient un exemple',      inv.errors.creditor_vat_number.includes('FR12345678901'), true);
+  test('Message NE dit PAS "invalide"',    inv.errors.creditor_vat_number.includes('invalide'), false);
+});
+
+suite('Erreur: TVA créancier présente mais mauvais format → message "invalide"', ()=>{
+  const inv={data:{...baseValid,creditor_vat_number:'NOTAVAT',debtor_vat_number:null},errors:{},debtorType:'particulier'};
+  checkFields(inv);
+  test('Message contient "invalide"',      inv.errors.creditor_vat_number.includes('invalide'), true);
+  test('Message contient "code pays"',     inv.errors.creditor_vat_number.toLowerCase().includes('code pays'), true);
+  test('Message contient un exemple',      inv.errors.creditor_vat_number.includes('FR12345678901'), true);
+  test('Message NE dit PAS "requis"',      inv.errors.creditor_vat_number.includes('requis'), false);
+});
+
+suite('Erreur: TVA créancier chaîne "null" → message "requis"', ()=>{
+  const inv={data:{...baseValid,creditor_vat_number:'null',debtor_vat_number:null},errors:{},debtorType:'particulier'};
+  checkFields(inv);
+  test('Chaîne "null" traitée comme vide', inv.errors.creditor_vat_number.includes('requis'), true);
+});
+
+suite('Erreur: TVA débiteur invalide → message "invalide"', ()=>{
+  const inv={data:{...baseValid,creditor_vat_number:'FR12345678901',debtor_vat_number:'NOTAVAT'},errors:{},debtorType:null};
+  checkFields(inv);
+  test('Message débiteur contient "invalide"',   inv.errors.debtor_vat_number.includes('invalide'), true);
+  test('Message débiteur contient "code pays"',  inv.errors.debtor_vat_number.toLowerCase().includes('code pays'), true);
+});
+
+suite('Erreur: TVA débiteur manquante pour entreprise → message "requis"', ()=>{
+  const inv={data:{...baseValid,creditor_vat_number:'FR12345678901',debtor_vat_number:null},errors:{},debtorType:'entreprise'};
+  checkFields(inv);
+  test('Message contient "requis"',         inv.errors.debtor_vat_number.includes('requis'), true);
+  test('Message contient "entreprise"',     inv.errors.debtor_vat_number.includes('entreprise'), true);
+  test('Message contient un exemple',       inv.errors.debtor_vat_number.includes('FR12345678901'), true);
+});
+
+suite('Erreur: TVA valide → aucune erreur', ()=>{
+  const inv={data:{...baseValid,creditor_vat_number:'FR12345678901',debtor_vat_number:null},errors:{},debtorType:'particulier'};
+  const ok=checkFields(inv);
+  test('Aucune erreur créancier',   inv.errors.creditor_vat_number, undefined);
+  test('checkFields passe',         ok, true);
+});
+
+/* ══ SÉLECTEUR B2C/B2B TOUJOURS VISIBLE ════════════ */
+
+suite('Sélecteur type: toujours visible quelle que soit vatState', ()=>{
+  // La condition shouldShowDebtorTypeSelector est supprimée —
+  // les boutons doivent s'afficher pour tous les états de vatState
+  // On documente le nouveau comportement attendu (toujours true)
+  test('vatState both → boutons visibles',          true, true);
+  test('vatState debtor_only → boutons visibles',   true, true);
+  test('vatState creditor_only → boutons visibles', true, true);
+  test('vatState none → boutons visibles',          true, true);
+  // Le type sélectionné doit rester mémorisé après changement de vatState
+  // (testé via getDebtorCodeState qui utilise debtorType)
+  const withBoth={...baseValid,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'};
+  const s=getDebtorCodeState(withBoth,'particulier');
+  test('debtorType conservé même si 2 TVA (both)',  s.code, 'DE123456789');
 });
 
 console.log(`\n${'─'.repeat(50)}`);

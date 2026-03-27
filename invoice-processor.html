@@ -683,14 +683,12 @@ function renderDebtorSection(inv,container){
     return div;
   };
 
-  // — Sélecteur de type (persistant, toujours visible quand nécessaire) —
-  if(shouldShowDebtorTypeSelector(vatState)){
-    const typeRow=document.createElement('div');typeRow.className='debtor-type-row';
-    typeRow.innerHTML=`<span style="font-size:12px;color:var(--text2);align-self:center;flex-shrink:0;">Type de client :</span>
-      <button class="debtor-type-btn${inv.debtorType==='particulier'?' active':''}" onclick="setDebtorType('particulier')">👤 Particulier</button>
-      <button class="debtor-type-btn${inv.debtorType==='entreprise'?' active':''}" onclick="setDebtorType('entreprise')">🏢 Entreprise</button>`;
-    section.appendChild(typeRow);
-  }
+  // — Sélecteur de type : toujours visible —
+  const typeRow=document.createElement('div');typeRow.className='debtor-type-row';
+  typeRow.innerHTML=`<span style="font-size:12px;color:var(--text2);align-self:center;flex-shrink:0;">Type de client :</span>
+    <button class="debtor-type-btn${inv.debtorType==='particulier'?' active':''}" onclick="setDebtorType('particulier')">👤 Particulier</button>
+    <button class="debtor-type-btn${inv.debtorType==='entreprise'?' active':''}" onclick="setDebtorType('entreprise')">🏢 Entreprise</button>`;
+  section.appendChild(typeRow);
 
   const mkSwitchBtn=()=>{
     const btn=document.createElement('button');btn.className='vat-switch-btn';
@@ -882,18 +880,25 @@ function checkFields(inv){
     else if(res.norm!==v&&res.norm!=null) inv.data[f.key]=res.norm;
   });
   // Creditor VAT always required
-  const nc=normalizeVAT(inv.data.creditor_vat_number);
-  if(!nc){inv.errors.creditor_vat_number='N° TVA créancier obligatoire';ok=false;}
-  else inv.data.creditor_vat_number=nc;
-  // Debtor VAT conditional
-  const vatState=resolveVATAssignment(inv.data.creditor_vat_number,inv.data.debtor_vat_number);
-  if(vatState==='both'||vatState==='debtor_only'){
-    const nd=normalizeVAT(inv.data.debtor_vat_number);
-    if(!nd){inv.errors.debtor_vat_number='N° TVA débiteur invalide';ok=false;}
+  const rawC=inv.data.creditor_vat_number;
+  const nc=normalizeVAT(rawC);
+  if(!nc){
+    const empty=rawC==null||String(rawC).trim()===''||String(rawC).toLowerCase()==='null';
+    inv.errors.creditor_vat_number=empty
+      ?'N° TVA créancier requis — ex : FR12345678901'
+      :'Format invalide — attendu : code pays + numéro (ex : FR12345678901, DE123456789)';
+    ok=false;
+  } else inv.data.creditor_vat_number=nc;
+  // Debtor VAT: validate if field has any non-empty value
+  const rawD=inv.data.debtor_vat_number;
+  const hasDebtorValue=rawD!=null&&String(rawD).trim()!==''&&String(rawD).toLowerCase()!=='null';
+  if(hasDebtorValue){
+    const nd=normalizeVAT(rawD);
+    if(!nd){inv.errors.debtor_vat_number='Format invalide — attendu : code pays + numéro (ex : FR12345678901, DE123456789)';ok=false;}
     else inv.data.debtor_vat_number=nd;
   }
   const state=getDebtorCodeState(inv.data,inv.debtorType||null);
-  if(state.vatRequired){inv.errors.debtor_vat_number='N° TVA débiteur obligatoire pour une entreprise';ok=false;}
+  if(state.vatRequired){inv.errors.debtor_vat_number='N° TVA débiteur requis pour une entreprise — ex : FR12345678901';ok=false;}
   return ok;
 }
 
