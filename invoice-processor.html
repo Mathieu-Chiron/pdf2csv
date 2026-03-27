@@ -897,6 +897,8 @@ function checkFields(inv){
       :'Format invalide — attendu : code pays + numéro (ex : FR12345678901, DE123456789)';
     ok=false;
   } else inv.data.creditor_vat_number=nc;
+  // B2C: clear any stale debtor_vat (re-extraction may have repopulated it)
+  if(inv.debtorType==='particulier') inv.data.debtor_vat_number=null;
   // Debtor VAT: validate if field has any non-empty value
   const rawD=inv.data.debtor_vat_number;
   const hasDebtorValue=rawD!=null&&String(rawD).trim()!==''&&String(rawD).toLowerCase()!=='null';
