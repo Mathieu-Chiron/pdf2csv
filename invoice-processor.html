@@ -108,6 +108,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .req{color:var(--red);}
 .field-input{width:100%;padding:8px 10px;font-size:13px;font-family:inherit;border:.5px solid var(--bd2);border-radius:var(--r);background:var(--bg);color:var(--text);outline:none;transition:border-color .15s,box-shadow .15s;}
 .field-input:focus{border-color:var(--teal);box-shadow:0 0 0 2px rgba(29,158,117,.12);}
+.field-input:disabled{opacity:0.4;cursor:not-allowed;background:var(--bg3);}
+.debtor-code-row.greyed .debtor-code-val{opacity:0.4;}
+.debtor-code-row.greyed .debtor-code-hint{opacity:0.5;}
+.debtor-code-row.greyed .field-lbl{opacity:0.5;}
 .field-input.err{border-color:var(--red);}
 .field-input.normd{border-color:var(--teal);background:var(--teal-bg);}
 .field-input.empty{border-color:var(--amber);background:var(--amber-bg);}
@@ -673,13 +677,19 @@ function renderDebtorSection(inv,container){
   const section=document.createElement('div');section.className='debtor-section';
   section.innerHTML='<div class="debtor-section-title">Identification débiteur</div>';
 
-  const mkVatField=(key,label,val,required)=>{
-    const err=inv.errors?.[key];
+  const mkVatField=(key,label,val,required,disabled=false)=>{
+    const err=!disabled?inv.errors?.[key]:null;
     const div=document.createElement('div');div.className='field-row';
-    div.innerHTML=`<div class="field-lbl">${esc(label)}${required?'<span class="req">*</span>':''}</div>
-      <input class="field-input${err?' empty':''}" type="text" id="fi_${key}" value="${esc(val||'')}"
-        placeholder="Ex: FR12345678901" oninput="onFI('${key}',this.value)"/>
-      ${err?`<div class="field-err">${esc(err)}</div>`:''}`;
+    if(disabled){
+      div.innerHTML=`<div class="field-lbl">${esc(label)}</div>
+        <input class="field-input" type="text" id="fi_${key}" value="${esc(val||'')}"
+          placeholder="Non applicable — client B2C" disabled/>`;
+    } else {
+      div.innerHTML=`<div class="field-lbl">${esc(label)}${required?'<span class="req">*</span>':''}</div>
+        <input class="field-input${err?' empty':''}" type="text" id="fi_${key}" value="${esc(val||'')}"
+          placeholder="Ex: FR12345678901" oninput="onFI('${key}',this.value)"/>
+        ${err?`<div class="field-err">${esc(err)}</div>`:''}`;
+    }
     return div;
   };
 
@@ -705,33 +715,30 @@ function renderDebtorSection(inv,container){
     section.appendChild(hint);
   }
 
-  // — TVA débiteur : conditionnelle —
-  const showDebtorField=vatState==='both'||vatState==='debtor_only'||state.showDebtorVatField;
-  if(showDebtorField){
-    if(hasDuplicateVAT(creditor,debtor)){
-      const warn=document.createElement('div');warn.className='field-err';warn.style.marginBottom='8px';
-      warn.textContent='⚠ Les deux numéros TVA sont identiques — vérifiez l\'attribution.';
-      section.appendChild(warn);
-    }
-    section.appendChild(mkSwitchBtn());
-    if(state.vatRequired){
-      const warn=document.createElement('div');warn.className='debtor-vat-warn';
-      warn.textContent='⚠ Le N° TVA du débiteur est obligatoire pour valider cette facture.';
-      section.appendChild(warn);
-    }
-    const debtorRequired=vatState==='both'||vatState==='debtor_only'||state.vatRequired;
-    section.appendChild(mkVatField('debtor_vat_number','N° TVA débiteur',debtor,debtorRequired));
+  // — TVA débiteur : toujours visible, désactivée si B2C —
+  if(hasDuplicateVAT(creditor,debtor)){
+    const warn=document.createElement('div');warn.className='field-err';warn.style.marginBottom='8px';
+    warn.textContent='⚠ Les deux numéros TVA sont identiques — vérifiez l\'attribution.';
+    section.appendChild(warn);
   }
+  if(creditor||debtor) section.appendChild(mkSwitchBtn());
+  if(state.vatRequired){
+    const warn=document.createElement('div');warn.className='debtor-vat-warn';
+    warn.textContent='⚠ Le N° TVA du débiteur est obligatoire pour valider cette facture.';
+    section.appendChild(warn);
+  }
+  const debtorVatDisabled=inv.debtorType==='particulier';
+  const debtorRequired=!debtorVatDisabled&&(vatState==='both'||vatState==='debtor_only'||state.vatRequired);
+  section.appendChild(mkVatField('debtor_vat_number','N° TVA débiteur',debtor,debtorRequired,debtorVatDisabled));
 
-  // — Code débiteur : masqué si entreprise (toujours calculé/exporté) —
+  // — Code débiteur : toujours visible, grisé si B2B —
   inv.data.debtor_code=state.code||null;
-  if(inv.debtorType!=='entreprise'){
-    const codeRow=document.createElement('div');codeRow.className='debtor-code-row';
-    codeRow.innerHTML=`<div class="field-lbl">Code débiteur</div>
-      <div class="debtor-code-val" id="debtorCodeVal">${esc(state.code||'—')}</div>
-      <div class="debtor-code-hint">Calculé automatiquement — non modifiable</div>`;
-    section.appendChild(codeRow);
-  }
+  const codeGreyed=inv.debtorType==='entreprise';
+  const codeRow=document.createElement('div');codeRow.className=`debtor-code-row${codeGreyed?' greyed':''}`;
+  codeRow.innerHTML=`<div class="field-lbl">Code débiteur</div>
+    <div class="debtor-code-val" id="debtorCodeVal">${esc(state.code||'—')}</div>
+    <div class="debtor-code-hint">${codeGreyed?'Remplacé par le N° TVA débiteur pour une entreprise':'Calculé automatiquement — non modifiable'}</div>`;
+  section.appendChild(codeRow);
 
   container.appendChild(section);
 }
@@ -740,6 +747,7 @@ function setDebtorType(type){
   if(S.cur===-1) return;
   const inv=S.invoices[S.cur];
   inv.debtorType=type;
+  if(type==='particulier') inv.data.debtor_vat_number=null;
   if(inv.status==='validated'||inv.status==='skipped') inv.status='extracted';
   selectInv(S.cur);
 }

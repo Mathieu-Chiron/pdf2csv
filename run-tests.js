@@ -890,6 +890,79 @@ suite('CSV simulation — mix B2C + B2B', ()=>{
   console.log('\n  [CSV MIXTE]\n  '+header+'\n  '+rows[0]+'\n  '+rows[1]);
 });
 
+/* ══ ÉTAT VISUEL CHAMPS B2C/B2B ══════════════════════ */
+
+// Pure function mirroring the UI grey/disabled logic
+function getVATFieldsState(debtorType){
+  return{
+    debtorVatDisabled: debtorType==='particulier',
+    debtorCodeGreyed:  debtorType==='entreprise'
+  };
+}
+
+// Simulate setDebtorType — mirrors what the app does on button click
+function simulateSetDebtorType(inv,type){
+  inv.debtorType=type;
+  if(type==='particulier') inv.data.debtor_vat_number=null; // B2C has no VAT
+  return inv;
+}
+
+suite('État visuel: B2C → TVA débiteur désactivée, code débiteur actif', ()=>{
+  const s=getVATFieldsState('particulier');
+  test('B2C: debtorVatDisabled = true',   s.debtorVatDisabled, true);
+  test('B2C: debtorCodeGreyed = false',   s.debtorCodeGreyed,  false);
+});
+
+suite('État visuel: B2B → TVA débiteur active, code débiteur grisé', ()=>{
+  const s=getVATFieldsState('entreprise');
+  test('B2B: debtorVatDisabled = false',  s.debtorVatDisabled, false);
+  test('B2B: debtorCodeGreyed = true',    s.debtorCodeGreyed,  true);
+});
+
+suite('État visuel: type non défini → tout actif', ()=>{
+  const s=getVATFieldsState(null);
+  test('null: debtorVatDisabled = false', s.debtorVatDisabled, false);
+  test('null: debtorCodeGreyed = false',  s.debtorCodeGreyed,  false);
+  const su=getVATFieldsState(undefined);
+  test('undefined: debtorVatDisabled = false', su.debtorVatDisabled, false);
+});
+
+suite('setDebtorType B2C: efface debtor_vat_number', ()=>{
+  const inv={data:{...baseOK,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'},errors:{},debtorType:null,status:'extracted'};
+  simulateSetDebtorType(inv,'particulier');
+  test('B2C: debtor_vat_number effacé',   inv.data.debtor_vat_number, null);
+  test('B2C: debtorType = particulier',   inv.debtorType, 'particulier');
+  // checkFields passe car debtor_vat est null et type=particulier
+  const ok=checkFields(inv);
+  test('B2C sans TVA débiteur : valide',  ok, true);
+  test('B2C sans TVA débiteur : aucune erreur débiteur', inv.errors.debtor_vat_number, undefined);
+});
+
+suite('setDebtorType B2B: conserve ou attend debtor_vat_number', ()=>{
+  // Sans TVA débiteur → bloqué
+  const inv={data:{...baseOK,creditor_vat_number:'FR12345678901',debtor_vat_number:null},errors:{},debtorType:null,status:'extracted'};
+  simulateSetDebtorType(inv,'entreprise');
+  test('B2B: debtorType = entreprise',    inv.debtorType, 'entreprise');
+  test('B2B: debtor_vat non effacé',      inv.data.debtor_vat_number, null);
+  const ok=checkFields(inv);
+  test('B2B sans TVA débiteur : bloqué',  ok, false);
+  test('B2B sans TVA : erreur requis',    inv.errors.debtor_vat_number.includes('requis'), true);
+  // Avec TVA débiteur → passe
+  inv.data.debtor_vat_number='DE123456789';inv.errors={};
+  test('B2B avec TVA débiteur : valide',  checkFields(inv), true);
+});
+
+suite('setDebtorType: basculement B2B→B2C efface TVA débiteur', ()=>{
+  const inv={data:{...baseOK,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'},errors:{},debtorType:'entreprise',status:'extracted'};
+  // Basculement vers B2C
+  simulateSetDebtorType(inv,'particulier');
+  test('Après B2B→B2C : debtor_vat effacé', inv.data.debtor_vat_number, null);
+  // Puis re-basculement vers B2B (la TVA est perdue, l\'utilisateur devra la re-saisir)
+  simulateSetDebtorType(inv,'entreprise');
+  test('Après B2C→B2B : debtor_vat toujours null', inv.data.debtor_vat_number, null);
+  test('B2B sans TVA après bascule : bloqué', checkFields(inv), false);
+});
+
 /* ══ MESSAGES D'ERREUR SPÉCIFIQUES ══════════════════ */
 
 const baseValid={debtor_company_name:'ACME',debtor_post_street_1:'1 rue A',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-001',invoice_date:'2024-01-01',invoice_due_date:'2024-02-01',amount_ttc:'100',invoice_total_amount_inc_vat:'100',invoice_open_amount_inc_vat:'100'};
