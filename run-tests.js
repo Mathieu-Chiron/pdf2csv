@@ -1127,6 +1127,56 @@ suite('Risque 6: CSV export contient debtor_vat d\'une facture B2B et vide pour 
   test('Valeur IT... toujours présente dans les données B2C',     b2cInv.data.debtor_vat_number, 'IT12345678901');
 });
 
+/* ══ SIMULATION: B2B → B2C → B2B ════════════════════ */
+
+suite('Simulation: B2B (TVA connue) → clic B2C → reclic B2B → CSV', ()=>{
+  const inv={
+    data:{
+      debtor_company_name:'ACME SAS',debtor_post_street_1:'5 avenue de la République',
+      debtor_post_postalcode:'75011',debtor_post_city:'Paris',debtor_post_country_code:'France',
+      invoice_number:'F-2024-099',invoice_date:'2024-06-01',invoice_due_date:'2024-07-01',
+      amount_ttc:1200,invoice_total_amount_inc_vat:1200,invoice_open_amount_inc_vat:1200,
+      creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789',debtor_code:'DE123456789'
+    },
+    errors:{},debtorType:'entreprise',status:'extracted'
+  };
+
+  // ── Étape 1: état initial B2B ───────────────────────
+  const s1=getDebtorCodeState(inv.data,inv.debtorType);
+  test('[1] B2B initial: debtor_code = TVA débiteur',      s1.code, 'DE123456789');
+  test('[1] B2B initial: debtor_vat_number',               inv.data.debtor_vat_number, 'DE123456789');
+  console.log('\n  État 1 (B2B):     debtorType='+inv.debtorType+', debtor_vat='+inv.data.debtor_vat_number+', debtor_code='+s1.code);
+
+  // ── Étape 2: clic B2C → champ grisé, valeur préservée ─
+  simulateSetDebtorType(inv,'particulier');
+  const s2=getDebtorCodeState(inv.data,inv.debtorType);
+  test('[2] Après B2C: debtorType = particulier',          inv.debtorType, 'particulier');
+  test('[2] Après B2C: debtor_vat_number préservé',        inv.data.debtor_vat_number, 'DE123456789');
+  test('[2] Après B2C: debtor_code = code généré',         s2.code, generateDebtorCode(inv.data));
+  console.log('  État 2 (→B2C):    debtorType='+inv.debtorType+', debtor_vat='+inv.data.debtor_vat_number+', debtor_code='+s2.code);
+
+  // ── Étape 3: reclic B2B → TVA récupérée ────────────
+  simulateSetDebtorType(inv,'entreprise');
+  const s3=getDebtorCodeState(inv.data,inv.debtorType);
+  test('[3] Après B2B: debtorType = entreprise',           inv.debtorType, 'entreprise');
+  test('[3] Après B2B: debtor_vat_number toujours là',     inv.data.debtor_vat_number, 'DE123456789');
+  test('[3] Après B2B: debtor_code = TVA initiale',        s3.code, 'DE123456789');
+  console.log('  État 3 (→B2B):    debtorType='+inv.debtorType+', debtor_vat='+inv.data.debtor_vat_number+', debtor_code='+s3.code);
+
+  // ── Étape 4: validation + export CSV ───────────────
+  inv.data.debtor_code=s3.code;
+  inv.status='validated';
+  const {header,rows,exportFields}=simulateBuildCSV([inv]);
+  const dVatIdx=exportFields.findIndex(f=>f.key==='debtor_vat_number');
+  const codeIdx=exportFields.findIndex(f=>f.key==='debtor_code');
+  const row=rows[0].split(',');
+  test('[4] CSV: debtor_vat = DE123456789',                row[dVatIdx], 'DE123456789');
+  test('[4] CSV: debtor_code = DE123456789 (TVA initiale)',row[codeIdx], 'DE123456789');
+  test('[4] CSV: debtor_code == debtor_vat',               row[codeIdx], row[dVatIdx]);
+  console.log('\n  '+header);
+  console.log('  '+rows[0]);
+});
+
 console.log(`\n${'─'.repeat(50)}`);
 console.log(`✓ ${pass} passed   ${fail>0?'✗ '+fail+' failed':''}`);
 console.log('─'.repeat(50));
