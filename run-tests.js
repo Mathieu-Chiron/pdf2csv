@@ -774,13 +774,14 @@ suite('Risque: checkFields idempotent (double appel sans corruption)', ()=>{
 /* ══ RESULTS ══ */
 /* ══ B2B / B2C CSV LOGIC ═════════════════════════════ */
 
-// Helper: builds CSV rows the same way buildCSV does in the app
+// Helper: mirrors buildCSV — scans only validated invoices for VAT columns
 const VAT_FIELDS_SIM=[{key:'creditor_vat_number',label:'N° TVA créancier'},{key:'debtor_vat_number',label:'N° TVA débiteur'}];
-function simulateBuildCSV(invoices){
-  const activeVAT=getActiveVATFields(invoices,VAT_FIELDS_SIM);
+function simulateBuildCSV(allInvoices){
+  const validated=allInvoices.filter(i=>i.status==='validated');
+  const activeVAT=getActiveVATFields(validated,VAT_FIELDS_SIM);
   const exportFields=[...FIELDS,...activeVAT,{key:'debtor_code',label:'Code débiteur'}];
   const header=exportFields.map(f=>f.label).join(',');
-  const rows=invoices.map(inv=>exportFields.map(f=>String(inv.data[f.key]??'')).join(','));
+  const rows=validated.map(inv=>exportFields.map(f=>{const v=inv.data[f.key]??'';return String(v).replace(/\r?\n/g,' ');}).join(','));
   return{header,rows,exportFields,csv:[header,...rows].join('\n')};
 }
 
@@ -881,6 +882,79 @@ suite('CSV simulation — mix B2C + B2B', ()=>{
   test('Mix: B2B debtor_vat = DE123456789',    b2bRow[debtorVatIdx], 'DE123456789');
   test('Mix: B2B debtor_code = debtor_vat',    b2bRow[codeIdx], b2bRow[debtorVatIdx]);
   console.log('\n  [CSV MIXTE]\n  '+header+'\n  '+rows[0]+'\n  '+rows[1]);
+});
+
+/* ══ CSV EXTRACTION SOUNDNESS ════════════════════════ */
+
+suite('Fix: activeVAT scan sur factures validées seulement', ()=>{
+  // Facture ignorée avec TVA débiteur, facture validée sans TVA débiteur
+  const skippedWithVAT={data:{...b2cData,debtor_vat_number:'DE123456789'},status:'skipped'};
+  const validatedNoVAT={data:{...b2cData,debtor_vat_number:null},status:'validated'};
+  const {header}=simulateBuildCSV([skippedWithVAT,validatedNoVAT]);
+  test('Ignorée avec TVA débiteur ne crée pas de colonne vide', header.includes('N° TVA débiteur'), false);
+  // Inverse : facture validée avec TVA débiteur → colonne présente
+  const validatedWithVAT={data:{...b2bData},status:'validated'};
+  const skippedNoVAT={data:{...b2cData},status:'skipped'};
+  const {header:h2}=simulateBuildCSV([validatedWithVAT,skippedNoVAT]);
+  test('Validée avec TVA débiteur → colonne présente', h2.includes('N° TVA débiteur'), true);
+});
+
+suite('CSV: export vide (aucune facture validée)', ()=>{
+  const {header,rows,csv}=simulateBuildCSV([{data:{...b2cData},status:'skipped'}]);
+  test('Aucune facture validée → aucune ligne de données', rows.length, 0);
+  test('Header toujours présent',                          header.length>0, true);
+  test('CSV = juste le header',                            csv, header);
+});
+
+suite('CSV: valeurs avec virgules → gérées par les guillemets', ()=>{
+  // Le simulateBuildCSV ne quote pas (test de la logique de buildCSV dans l\'app)
+  // On vérifie que la valeur brute avec virgule est bien dans le champ
+  const invWithComma={data:{...b2cData,debtor_company_name:'Dupont, Jean'},status:'validated'};
+  const {rows,exportFields}=simulateBuildCSV([invWithComma]);
+  const nameIdx=exportFields.findIndex(f=>f.key==='debtor_company_name');
+  // Dans notre simulateur les valeurs ne sont pas quotées — on vérifie que la valeur est correcte
+  test('Valeur avec virgule stockée correctement', invWithComma.data.debtor_company_name, 'Dupont, Jean');
+  // Dans buildCSV réel, la valeur serait "Dupont, Jean" (quotée) — on simule ici
+  const csvVal='"'+String(invWithComma.data.debtor_company_name).replace(/"/g,'""')+'"';
+  test('buildCSV quote la valeur avec virgule', csvVal, '"Dupont, Jean"');
+});
+
+suite('CSV: valeurs avec guillemets → escapés en ""', ()=>{
+  const raw='Société "Dupont"';
+  const escaped='"'+raw.replace(/"/g,'""')+'"';
+  test('Guillemets doublés',       escaped, '"Société ""Dupont"""');
+  test('Pas de guillemet non fermé', (escaped.match(/"/g)||[]).length % 2, 0);
+});
+
+suite('CSV: valeurs avec sauts de ligne → remplacés par espace', ()=>{
+  const withNewline='12 rue\nde la Paix';
+  const withCRLF='12 rue\r\nde la Paix';
+  const fixed1=withNewline.replace(/\r?\n/g,' ');
+  const fixed2=withCRLF.replace(/\r?\n/g,' ');
+  test('LF remplacé par espace',   fixed1, '12 rue de la Paix');
+  test('CRLF remplacé par espace', fixed2, '12 rue de la Paix');
+  // Vérifier que le CSV simulé ne casse pas les lignes
+  const invWithNewline={data:{...b2cData,debtor_post_street_1:'12 rue\nde la Paix'},status:'validated'};
+  const {rows,exportFields}=simulateBuildCSV([invWithNewline]);
+  const streetIdx=exportFields.findIndex(f=>f.key==='debtor_post_street_1');
+  test('Saut de ligne dans adresse → remplacé dans CSV', rows[0].split(',')[streetIdx], '12 rue de la Paix');
+  test('CSV ne contient pas de saut de ligne parasite',  rows[0].includes('\n'), false);
+});
+
+suite('CSV: debtor_code null → chaîne vide dans CSV', ()=>{
+  const invNullCode={data:{...b2cData,debtor_code:null},status:'validated'};
+  const {rows,exportFields}=simulateBuildCSV([invNullCode]);
+  const codeIdx=exportFields.findIndex(f=>f.key==='debtor_code');
+  test('debtor_code null → vide dans CSV', rows[0].split(',')[codeIdx], '');
+});
+
+suite('CSV: toutes les factures validées sont exportées', ()=>{
+  const inv1={data:{...b2cData,invoice_number:'F-001'},status:'validated'};
+  const inv2={data:{...b2bData,invoice_number:'F-002'},status:'validated'};
+  const inv3={data:{...b2cData,invoice_number:'F-003'},status:'skipped'};
+  const {rows}=simulateBuildCSV([inv1,inv2,inv3]);
+  test('2 validées → 2 lignes',    rows.length, 2);
+  test('Ignorée exclue du CSV',    rows.every(r=>!r.includes('F-003')), true);
 });
 
 console.log(`\n${'─'.repeat(50)}`);

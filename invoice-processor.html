@@ -941,7 +941,7 @@ function showExport(){
     <div class="exp-stat"><div class="exp-stat-n">${S.invoices.length}</div><div class="exp-stat-l">Total</div></div>
     <div class="exp-stat"><div class="exp-stat-n" style="color:var(--teal-text);">${val.length}</div><div class="exp-stat-l">Validées</div></div>
     <div class="exp-stat"><div class="exp-stat-n" style="color:var(--amber-text);">${skip.length}</div><div class="exp-stat-l">Ignorées</div></div>`;
-  const activeVAT=VAT_FIELDS.filter(f=>S.invoices.some(inv=>inv.data[f.key]));
+  const activeVAT=VAT_FIELDS.filter(f=>val.some(inv=>inv.data[f.key]));
   const exportFields=[...S.fields,...activeVAT,{key:'debtor_code',label:'Code débiteur'}];
   const thead=document.querySelector('#expTable thead'),tbody=document.querySelector('#expTable tbody');
   thead.innerHTML='<tr>'+['Fichier',...exportFields.map(f=>f.label),'Statut'].map(h=>`<th>${esc(h)}</th>`).join('')+'</tr>';
@@ -962,10 +962,10 @@ function snName(s){return s.replace(/[\/\\:*?"<>|]/g,'').replace(/\s+/g,'_').sli
 function getPdfFilename(inv){const num=inv.data['invoice_number'];return(num&&String(num).trim())?snName(String(num))+'.pdf':snName(inv.file.name);}
 function buildCSV(){
   const validated=S.invoices.filter(i=>i.status==='validated');
-  const activeVAT=VAT_FIELDS.filter(f=>S.invoices.some(inv=>inv.data[f.key]));
+  const activeVAT=VAT_FIELDS.filter(f=>validated.some(inv=>inv.data[f.key]));
   const exportFields=[...S.fields,...activeVAT,{key:'debtor_code',label:'Code débiteur'}];
   const header=exportFields.map(f=>`"${f.label}"`).join(',');
-  const rows=validated.map(inv=>exportFields.map(f=>{const v=inv.data[f.key]??'';return'"'+String(v).replace(/"/g,'""')+'"';}).join(','));
+  const rows=validated.map(inv=>exportFields.map(f=>{const v=inv.data[f.key]??'';return'"'+String(v).replace(/"/g,'""').replace(/\r?\n/g,' ')+'"';}).join(','));
   return [header,...rows].join('\n');
 }
 function exportCSV(){dlBlob(new Blob(['\uFEFF'+buildCSV()],{type:'text/csv;charset=utf-8;'}),'factures.csv');}
