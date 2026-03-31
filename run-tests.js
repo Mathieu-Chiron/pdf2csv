@@ -1250,6 +1250,116 @@ suite('Simulation: B2B (TVA connue) → clic B2C → reclic B2B → CSV', ()=>{
   console.log('  '+rows[0]);
 });
 
+/* ══ BUG: FR123456789 REJETÉE — FORMAT INCOMPLET ════ */
+
+// Shared base for bug tests (also used by later suites)
+const bugBase={debtor_company_name:'Test SA',debtor_post_street_1:'1 rue Test',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-999',invoice_date:'2024-01-01',invoice_due_date:'2024-02-01',amount_ttc:'100',invoice_total_amount_inc_vat:'100',invoice_open_amount_inc_vat:'100'};
+function bugInv(vat){return{data:{...bugBase,creditor_vat_number:vat,debtor_vat_number:null},errors:{},debtorType:'particulier'};}
+
+suite('Bug: FR123456789 (11 chars) rejeté — format FR requiert 13 chars', ()=>{
+  // User entered FR + 9 digits = 11 chars.
+  // Correct French format: FR + 2 alphanum key + 9 digits = 13 chars.
+  // Code behaviour is CORRECT — but error message needs to be more specific.
+  test('FR123456789 → normalizeVAT null (invalide)',  normalizeVAT('FR123456789'), null);
+  test('FR12345678901 → normalizeVAT valide (13 chars)', normalizeVAT('FR12345678901')!==null, true);
+  test('FR123456789 length = 11 (trop court)',         'FR123456789'.length, 11);
+  test('FR12345678901 length = 13 (correct)',          'FR12345678901'.length, 13);
+
+  // Current error message is generic — does not say "13 chars expected"
+  const inv=bugInv('FR123456789');
+  checkFields(inv);
+  test('Erreur générée',                              !!inv.errors.creditor_vat_number, true);
+  test('Message contient "invalide"',                 inv.errors.creditor_vat_number.includes('invalide'), true);
+  // The message should ideally explain the exact format for FR
+  // → fix: add country-specific hint when the country prefix is recognised
+  test('TODO: message explique format FR attendu',    inv.errors.creditor_vat_number.includes('FR'), true);
+});
+
+/* ══ BUG: TVA CRÉANCIER VALIDE REJETÉE ══════════════ */
+
+suite('Bug: formats valides standard → checkFields passe', ()=>{
+  // These are clean, unambiguous formats — all must pass
+  const clean=[
+    ['FR numérique','FR12345678901'],
+    ['FR alpha key','FRAB123456789'],
+    ['DE','DE123456789'],
+    ['BE 10 chiffres','BE0123456789'],
+    ['IT','IT12345678901'],
+    ['CHE','CHE123456789'],
+    ['NL','NL123456789B01'],
+    ['ATU','ATU12345678'],
+    ['ES','ESA1234567B'],
+    ['PT','PT123456789'],
+    ['SE','SE123456789012'],
+    ['PL','PL1234567890'],
+  ];
+  clean.forEach(([label,val])=>{
+    const inv=bugInv(val);
+    test(`${label}: checkFields passe`,         checkFields(inv), true);
+    test(`${label}: aucune erreur créancier`,    inv.errors.creditor_vat_number, undefined);
+  });
+});
+
+suite('Bug: formats valides avec séparateurs communs → checkFields passe', ()=>{
+  // Separators stripped by normalizeVAT: spaces, dots, dashes
+  const withSep=[
+    ['FR espaces',         'FR 12 345 678 901'],
+    ['FR tirets',          'FR-12-345-678-901'],
+    ['FR points',          'FR.12.345.678.901'],
+    ['FR minuscules',      'fr12345678901'],
+    ['FR espace début/fin',' FR12345678901 '],
+    ['DE espaces',         'DE 123 456 789'],
+    ['BE points',          'BE0412.345.678'],
+    ['CHE tirets+points',  'CHE-123.456.789'],
+    ['IT espaces',         'IT 12345678901'],
+  ];
+  withSep.forEach(([label,val])=>{
+    const inv=bugInv(val);
+    test(`${label}: checkFields passe`,         checkFields(inv), true);
+    test(`${label}: aucune erreur créancier`,    inv.errors.creditor_vat_number, undefined);
+  });
+});
+
+suite('Bug: formats avec séparateurs NON strippés → invalides', ()=>{
+  // normalizeVAT only strips [\s.\-] — slashes and other chars are NOT removed
+  // These FAIL even if the number looks valid → documents a known gap
+  const nonStripped=[
+    ['FR slash',           'FR/12/345/678/901'],
+    ['FR underscore',      'FR_12345678901'],
+    ['FR virgule',         'FR,12345678901'],
+  ];
+  nonStripped.forEach(([label,val])=>{
+    test(`${label}: normalizeVAT → null (/ non strippé)`, normalizeVAT(val), null);
+    const inv=bugInv(val);
+    checkFields(inv);
+    test(`${label}: erreur "invalide" (non "requis")`, inv.errors.creditor_vat_number?.includes('invalide'), true);
+  });
+});
+
+suite('Bug: confusions de format fréquentes', ()=>{
+  // Common mistakes users make — these should fail with "invalide" not silently pass
+  test('CH sans E (doit être CHE)',       normalizeVAT('CH123456789'),   null);
+  test('AT sans U (doit être ATU)',       normalizeVAT('AT12345678'),    null);
+  test('BE 9 chiffres (ancien format)',   normalizeVAT('BE123456789'),   null);
+  test('FR trop court (12 chars)',        normalizeVAT('FR1234567890'),  null);
+  test('FR trop long  (14 chars)',        normalizeVAT('FR123456789012'),null);
+  test('DE 8 chiffres (trop court)',      normalizeVAT('DE12345678'),    null);
+  test('CHE trop court (8 chiffres)',     normalizeVAT('CHE12345678'),   null);
+});
+
+suite('Bug: checkFields message "invalide" vs "requis" selon le contenu', ()=>{
+  // Non-empty but invalid → "invalide"
+  const inv1=bugInv('NOTAVAT');checkFields(inv1);
+  test('Non-vide invalide → message "invalide"',         inv1.errors.creditor_vat_number?.includes('invalide'),true);
+  test('Non-vide invalide → pas "requis"',               inv1.errors.creditor_vat_number?.includes('requis'), false);
+  // Slash → not stripped → "invalide"
+  const inv2=bugInv('FR/12345678901');checkFields(inv2);
+  test('Slash non strippé → message "invalide"',         inv2.errors.creditor_vat_number?.includes('invalide'),true);
+  // CH (missing E) → "invalide"
+  const inv3=bugInv('CH123456789');checkFields(inv3);
+  test('CH sans E → message "invalide"',                 inv3.errors.creditor_vat_number?.includes('invalide'),true);
+});
+
 console.log(`\n${'─'.repeat(50)}`);
 console.log(`✓ ${pass} passed   ${fail>0?'✗ '+fail+' failed':''}`);
 console.log('─'.repeat(50));
