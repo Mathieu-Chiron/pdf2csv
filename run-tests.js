@@ -75,9 +75,10 @@ function checkFields(inv) {
   const nc=normalizeVAT(rawC);
   if(!nc){
     const empty=rawC==null||String(rawC).trim()===''||String(rawC).toLowerCase()==='null';
+    const hintC=getVATHint(rawC);
     inv.errors.creditor_vat_number=empty
       ?'N° TVA créancier requis — ex : FR12345678901'
-      :'Format invalide — attendu : code pays + numéro (ex : FR12345678901, DE123456789)';
+      :hintC?`Format invalide — ${hintC.desc} (ex : ${hintC.example})`:'Format invalide — attendu : code pays + numéro (ex : FR12345678901, DE123456789)';
     ok=false;
   } else inv.data.creditor_vat_number=nc;
   // B2C: field is greyed out — skip debtor_vat validation (value preserved, masked in CSV export)
@@ -86,7 +87,7 @@ function checkFields(inv) {
     const hasDebtorValue=rawD!=null&&String(rawD).trim()!==''&&String(rawD).toLowerCase()!=='null';
     if(hasDebtorValue){
       const nd=normalizeVAT(rawD);
-      if(!nd){inv.errors.debtor_vat_number='Format invalide — attendu : code pays + numéro (ex : FR12345678901, DE123456789)';ok=false;}
+      if(!nd){const h=getVATHint(rawD);inv.errors.debtor_vat_number=h?`Format invalide — ${h.desc} (ex : ${h.example})`:'Format invalide — attendu : code pays + numéro (ex : FR12345678901, DE123456789)';ok=false;}
       else inv.data.debtor_vat_number=nd;
     }
     const state=getDebtorCodeState(inv.data,inv.debtorType||null);
@@ -163,6 +164,48 @@ function normalizeVAT(raw){
   if(!raw) return null;
   const s=String(raw).replace(/[\s.\-]/g,'').toUpperCase();
   return isValidVAT(s)?s:null;
+}
+
+const VAT_HINTS={
+  AT:{example:'ATU12345678',    desc:'ATU + 8 chiffres'},
+  BE:{example:'BE0123456789',   desc:'BE + 10 chiffres'},
+  BG:{example:'BG123456789',    desc:'BG + 9 ou 10 chiffres'},
+  HR:{example:'HR12345678901',  desc:'HR + 11 chiffres'},
+  CY:{example:'CY12345678A',    desc:'CY + 8 chiffres + 1 lettre'},
+  CZ:{example:'CZ12345678',     desc:'CZ + 8 à 10 chiffres'},
+  DK:{example:'DK12345678',     desc:'DK + 8 chiffres'},
+  EE:{example:'EE123456789',    desc:'EE + 9 chiffres'},
+  FI:{example:'FI12345678',     desc:'FI + 8 chiffres'},
+  FR:{example:'FR12345678901',  desc:'FR + 2 caractères + 9 chiffres'},
+  DE:{example:'DE123456789',    desc:'DE + 9 chiffres'},
+  EL:{example:'EL123456789',    desc:'EL + 9 chiffres'},
+  GR:{example:'EL123456789',    desc:'EL + 9 chiffres (la Grèce utilise le préfixe EL)'},
+  HU:{example:'HU12345678',     desc:'HU + 8 chiffres'},
+  IE:{example:'IE1234567A',     desc:'IE + 7 chiffres + 1-2 lettres'},
+  IT:{example:'IT12345678901',  desc:'IT + 11 chiffres'},
+  LV:{example:'LV12345678901',  desc:'LV + 11 chiffres'},
+  LT:{example:'LT123456789',    desc:'LT + 9 ou 12 chiffres'},
+  LU:{example:'LU12345678',     desc:'LU + 8 chiffres'},
+  MT:{example:'MT12345678',     desc:'MT + 8 chiffres'},
+  NL:{example:'NL123456789B01', desc:'NL + 9 chiffres + B + 2 chiffres'},
+  PL:{example:'PL1234567890',   desc:'PL + 10 chiffres'},
+  PT:{example:'PT123456789',    desc:'PT + 9 chiffres'},
+  RO:{example:'RO12345678',     desc:'RO + 2 à 10 chiffres'},
+  SK:{example:'SK1234567890',   desc:'SK + 10 chiffres'},
+  SI:{example:'SI12345678',     desc:'SI + 8 chiffres'},
+  ES:{example:'ESA1234567B',    desc:'ES + 1 caractère + 7 chiffres + 1 caractère'},
+  SE:{example:'SE123456789012', desc:'SE + 12 chiffres'},
+  GB:{example:'GB123456789',    desc:'GB + 9 chiffres'},
+  CHE:{example:'CHE123456789',  desc:'CHE + 9 chiffres'},
+  CH:{example:'CHE123456789',   desc:'CHE + 9 chiffres (préfixe CHE, pas CH)'},
+};
+function getVATHint(raw){
+  if(!raw) return null;
+  const s=String(raw).replace(/[\s.\-]/g,'').toUpperCase();
+  if(s.length<2) return null;
+  if(s.length>=3&&VAT_HINTS[s.slice(0,3)]) return VAT_HINTS[s.slice(0,3)];
+  if(VAT_HINTS[s.slice(0,2)]) return VAT_HINTS[s.slice(0,2)];
+  return null;
 }
 
 function resolveVATAssignment(creditorVAT,debtorVAT){
@@ -1358,6 +1401,67 @@ suite('Bug: checkFields message "invalide" vs "requis" selon le contenu', ()=>{
   // CH (missing E) → "invalide"
   const inv3=bugInv('CH123456789');checkFields(inv3);
   test('CH sans E → message "invalide"',                 inv3.errors.creditor_vat_number?.includes('invalide'),true);
+});
+
+/* ══ MESSAGES D'ERREUR TVA SPÉCIFIQUES AU PAYS ═══════ */
+
+// One canonical example per country prefix — mirrors VAT_HINTS in the app
+suite('Message TVA: préfixe reconnu → exemple pays spécifique', ()=>{
+  const cases=[
+    ['FR court',   'FR123456789',   'FR12345678901'],
+    ['FR valide',  'FRBAD',         'FR12345678901'],
+    ['DE court',   'DE12345',       'DE123456789'],
+    ['BE court',   'BE012345678',   'BE0123456789'],
+    ['IT court',   'IT1234567890',  'IT12345678901'],
+    ['CHE court',  'CHE12345678',   'CHE123456789'],
+    ['CH bad pfx', 'CH123456789',   'CHE123456789'],
+    ['ATU court',  'ATU1234567',    'ATU12345678'],
+    ['NL bad',     'NL123456789',   'NL123456789B01'],
+    ['ES bad',     'ESABC',         'ESA1234567B'],
+    ['GR (→EL)',   'GR123456789',   'EL123456789'],
+  ];
+  cases.forEach(([label,input,expectedExample])=>{
+    const hint=getVATHint(input);
+    test(`getVATHint "${input}" → example contient "${expectedExample}"`, hint?.example, expectedExample);
+  });
+});
+
+suite('Message TVA: préfixe inconnu → hint null', ()=>{
+  test('Texte arbitraire',      getVATHint('NOTAVAT'),    null);
+  test('Vide',                  getVATHint(''),           null);
+  test('Null',                  getVATHint(null),         null);
+  test('Chiffres seuls',        getVATHint('123456789'),  null);
+  test('XX inconnu',            getVATHint('XX12345'),    null);
+});
+
+suite('Message TVA: checkFields utilise hint pays pour créancier', ()=>{
+  // With hint implemented: error message should mention the country example
+  const cases=[
+    ['FR123456789',  'FR12345678901'],
+    ['DE12345',      'DE123456789'],
+    ['CH123456789',  'CHE123456789'],
+    ['BE012345678',  'BE0123456789'],
+  ];
+  cases.forEach(([input,example])=>{
+    const inv=bugInv(input);
+    checkFields(inv);
+    test(`"${input}" → erreur mentionne exemple "${example}"`,
+      inv.errors.creditor_vat_number?.includes(example), true);
+  });
+});
+
+suite('Message TVA: checkFields utilise hint pays pour débiteur', ()=>{
+  const inv={data:{...bugBase,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE12345'},errors:{},debtorType:null};
+  checkFields(inv);
+  test('Débiteur DE court → erreur mentionne DE123456789',
+    inv.errors.debtor_vat_number?.includes('DE123456789'), true);
+});
+
+suite('Message TVA: préfixe inconnu → message générique', ()=>{
+  const inv=bugInv('NOTAVAT');
+  checkFields(inv);
+  test('Préfixe inconnu → message générique',
+    inv.errors.creditor_vat_number?.includes('FR12345678901'), true);
 });
 
 console.log(`\n${'─'.repeat(50)}`);
