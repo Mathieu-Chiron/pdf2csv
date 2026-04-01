@@ -830,22 +830,18 @@ suite('Risque: checkFields idempotent (double appel sans corruption)', ()=>{
 /* ══ B2B / B2C CSV LOGIC ═════════════════════════════ */
 
 // Helper: mirrors buildCSV — scans only validated invoices for VAT columns
-// N° TVA débiteur is never exported — debtor_code already carries that value for B2B
-const EMPTY_COLS_SIM=['administration_code','debtor_invoice_email','debtor_reminder_email','debtor_sms_number','debtor_origin_id'].map(k=>({key:k,label:k}));
-const VAT_FIELDS_SIM=[{key:'creditor_vat_number',label:'N° TVA créancier'}];
+const EXPORT_COLS_SIM=['administration_code','debtor_code','debtor_lastname','debtor_post_street_1','debtor_post_postalcode','debtor_post_city','invoice_number','invoice_date','invoice_due_date','invoice_total_amount_inc_vat','invoice_open_amount_inc_vat','debtor_invoice_email','debtor_reminder_email','debtor_sms_number','debtor_origin_id'];
+const EMPTY_KEYS_SIM=['debtor_invoice_email','debtor_reminder_email','debtor_sms_number','debtor_origin_id'];
 function simulateBuildCSV(invoices){
   const validated=invoices.filter(i=>i.status==='validated');
-  const activeVAT=VAT_FIELDS_SIM.filter(f=>validated.some(inv=>inv.data&&inv.data[f.key]));
-  const firstField=FIELDS[0]; // debtor_lastname
-  const restFields=FIELDS.slice(1);
-  const debtorCodeField={key:'debtor_code',label:'debtor_code'};
-  const exportFields=[firstField,debtorCodeField,...restFields,...activeVAT,...EMPTY_COLS_SIM];
-  const header=exportFields.map(f=>f.key).join(';');
-  const rows=validated.map(inv=>exportFields.map(f=>{
-    let v=String(inv.data[f.key]??'').replace(/\r?\n/g,' ');
-    if(f.key==='debtor_code'&&!v) v=generateDebtorCode(inv.data);
-    if(f.key==='administration_code') v=String(inv.data.creditor_vat_number??'');
-    else if(EMPTY_COLS_SIM.some(c=>c.key===f.key)) v='';
+  const exportFields=EXPORT_COLS_SIM.map(k=>({key:k,label:k}));
+  const header=EXPORT_COLS_SIM.join(';');
+  const rows=validated.map(inv=>EXPORT_COLS_SIM.map(k=>{
+    let v='';
+    if(k==='administration_code') v=String(inv.data.creditor_vat_number??'');
+    else if(k==='debtor_code') v=String(inv.data[k]||generateDebtorCode(inv.data));
+    else if(EMPTY_KEYS_SIM.includes(k)) v='';
+    else v=String(inv.data[k]??'').replace(/\r?\n/g,' ');
     return v;
   }).join(';'));
   return{header,rows,exportFields,csv:[header,...rows].join('\n')};
@@ -906,22 +902,21 @@ suite('B2C: debtor_vat_number vide, debtor_code généré', ()=>{
 // ── Simulation CSV B2C seul ───────────────────────────
 suite('CSV simulation — B2C seul', ()=>{
   const {header,rows,exportFields}=simulateBuildCSV([{data:b2cData,status:'validated'}]);
-  test('Colonne creditor_vat présente',        header.includes('creditor_vat_number'), true);
-  // Pas de colonne debtor_vat (aucune facture n'en a)
+  test('Colonne creditor_vat absente (dans administration_code)', header.includes('creditor_vat_number'), false);
   test('Colonne debtor_vat absente (B2C pur)', header.includes('debtor_vat_number'),  false);
   test('Colonne debtor_code présente',         header.includes('debtor_code'),    true);
   const row=rows[0].split(';');
   const codeIdx=exportFields.findIndex(f=>f.key==='debtor_code');
   test('debtor_code = code généré dans CSV',   row[codeIdx], b2cData.debtor_code);
-  const vatIdx=exportFields.findIndex(f=>f.key==='creditor_vat_number');
-  test('creditor_vat = FR12345678901 dans CSV', row[vatIdx], 'FR12345678901');
+  const adminIdx=exportFields.findIndex(f=>f.key==='administration_code');
+  test('administration_code = creditor_vat dans CSV', row[adminIdx], 'FR12345678901');
   console.log('\n  [CSV B2C]\n  '+header+'\n  '+rows[0]);
 });
 
 // ── Simulation CSV B2B seul ───────────────────────────
 suite('CSV simulation — B2B seul', ()=>{
   const {header,rows,exportFields}=simulateBuildCSV([{data:b2bData,status:'validated'}]);
-  test('Colonne creditor_vat présente',          header.includes('creditor_vat_number'), true);
+  test('Colonne creditor_vat absente (dans administration_code)', header.includes('creditor_vat_number'), false);
   test('Colonne debtor_vat absente (jamais CSV)', header.includes('debtor_vat_number'),  false);
   test('Colonne debtor_code présente',           header.includes('debtor_code'),    true);
   const row=rows[0].split(';');

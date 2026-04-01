@@ -1031,19 +1031,15 @@ function snName(s){return s.replace(/[\/\\:*?"<>|]/g,'').replace(/\s+/g,'_').sli
 function getPdfFilename(inv){const num=inv.data['invoice_number'];return(num&&String(num).trim())?snName(String(num))+'.pdf':snName(inv.file.name);}
 function buildCSV(){
   const validated=S.invoices.filter(i=>i.status==='validated');
-  // N° TVA débiteur is never exported — debtor_code already carries that value for B2B
-  const activeVAT=VAT_FIELDS.filter(f=>f.key!=='debtor_vat_number'&&validated.some(inv=>inv.data[f.key]));
-  const EMPTY_COLS=['administration_code','debtor_invoice_email','debtor_reminder_email','debtor_sms_number','debtor_origin_id'].map(k=>({key:k,label:k}));
-  const firstField=S.fields[0]; // debtor_lastname
-  const restFields=S.fields.slice(1);
-  const debtorCodeField={key:'debtor_code',label:'debtor_code'};
-  const exportFields=[firstField,debtorCodeField,...restFields,...activeVAT,...EMPTY_COLS];
-  const header=exportFields.map(f=>`"${f.key}"`).join(';');
-  const rows=validated.map(inv=>exportFields.map(f=>{
-    let v=inv.data[f.key]??'';
-    if(f.key==='debtor_code'&&!v) v=generateDebtorCode(inv.data);
-    if(f.key==='administration_code') v=inv.data.creditor_vat_number??'';
-    else if(EMPTY_COLS.some(c=>c.key===f.key)) v='';
+  const EXPORT_COLS=['administration_code','debtor_code','debtor_lastname','debtor_post_street_1','debtor_post_postalcode','debtor_post_city','invoice_number','invoice_date','invoice_due_date','invoice_total_amount_inc_vat','invoice_open_amount_inc_vat','debtor_invoice_email','debtor_reminder_email','debtor_sms_number','debtor_origin_id'];
+  const EMPTY_KEYS=['debtor_invoice_email','debtor_reminder_email','debtor_sms_number','debtor_origin_id'];
+  const header=EXPORT_COLS.map(k=>`"${k}"`).join(';');
+  const rows=validated.map(inv=>EXPORT_COLS.map(k=>{
+    let v='';
+    if(k==='administration_code') v=inv.data.creditor_vat_number??'';
+    else if(k==='debtor_code') v=inv.data.debtor_code||generateDebtorCode(inv.data);
+    else if(EMPTY_KEYS.includes(k)) v='';
+    else v=inv.data[k]??'';
     return'"'+String(v).replace(/"/g,'""').replace(/\r?\n/g,' ')+'"';
   }).join(';'));
   return [header,...rows].join('\n');
