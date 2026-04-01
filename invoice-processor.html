@@ -1042,7 +1042,8 @@ function buildCSV(){
   const rows=validated.map(inv=>exportFields.map(f=>{
     let v=inv.data[f.key]??'';
     if(f.key==='debtor_code'&&!v) v=generateDebtorCode(inv.data);
-    if(EMPTY_COLS.some(c=>c.key===f.key)) v='';
+    if(f.key==='administration_code') v=inv.data.creditor_vat_number??'';
+    else if(EMPTY_COLS.some(c=>c.key===f.key)) v='';
     return'"'+String(v).replace(/"/g,'""').replace(/\r?\n/g,' ')+'"';
   }).join(';'));
   return [header,...rows].join('\n');

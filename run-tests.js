@@ -844,7 +844,8 @@ function simulateBuildCSV(invoices){
   const rows=validated.map(inv=>exportFields.map(f=>{
     let v=String(inv.data[f.key]??'').replace(/\r?\n/g,' ');
     if(f.key==='debtor_code'&&!v) v=generateDebtorCode(inv.data);
-    if(EMPTY_COLS_SIM.some(c=>c.key===f.key)) v='';
+    if(f.key==='administration_code') v=String(inv.data.creditor_vat_number??'');
+    else if(EMPTY_COLS_SIM.some(c=>c.key===f.key)) v='';
     return v;
   }).join(';'));
   return{header,rows,exportFields,csv:[header,...rows].join('\n')};
@@ -1294,6 +1295,21 @@ suite('Simulation: B2B (TVA connue) → clic B2C → reclic B2B → CSV', ()=>{
 });
 
 /* ══ CSV COLUMN ORDER — debtor_vat never exported ═══ */
+
+suite('CSV: administration_code = creditor_vat_number', ()=>{
+  const base={debtor_lastname:'Test SA',debtor_post_street_1:'1 rue Test',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-001',invoice_date:'2024-01-01',invoice_due_date:'2024-02-01',invoice_total_amount_inc_vat:'100',invoice_open_amount_inc_vat:'100'};
+  const inv={data:{...base,creditor_vat_number:'FR12345678901',debtor_code:'DE123456789'},debtorType:'entreprise',status:'validated'};
+  const {exportFields,rows}=simulateBuildCSV([inv]);
+  const adminIdx=exportFields.findIndex(f=>f.key==='administration_code');
+  const row=rows[0].split(';');
+  test('Colonne administration_code présente',           adminIdx>=0, true);
+  test('administration_code = creditor_vat_number',     row[adminIdx], 'FR12345678901');
+  // No creditor VAT
+  const inv2={data:{...base,creditor_vat_number:null,debtor_code:'TESPAR1R750'},debtorType:'particulier',status:'validated'};
+  const {exportFields:ef2,rows:rows2}=simulateBuildCSV([inv2]);
+  const adminIdx2=ef2.findIndex(f=>f.key==='administration_code');
+  test('administration_code vide si créancier null',    rows2[0].split(';')[adminIdx2], '');
+});
 
 suite('CSV: N° TVA débiteur jamais dans le CSV — Code débiteur en position fixe', ()=>{
   const base={debtor_lastname:'Test SA',debtor_post_street_1:'1 rue Test',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-001',invoice_date:'2024-01-01',invoice_due_date:'2024-02-01',amount_ttc:'100',invoice_total_amount_inc_vat:'100',invoice_open_amount_inc_vat:'100'};
