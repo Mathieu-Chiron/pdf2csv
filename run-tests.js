@@ -837,7 +837,7 @@ function simulateBuildCSV(invoices){
   const validated=invoices.filter(i=>i.status==='validated');
   const activeVAT=VAT_FIELDS_SIM.filter(f=>validated.some(inv=>inv.data&&inv.data[f.key]));
   const exportFields=[...FIELDS,...activeVAT,{key:'debtor_code',label:'Code débiteur'}];
-  const header=exportFields.map(f=>f.label).join(',');
+  const header=exportFields.map(f=>f.key).join(',');
   const rows=validated.map(inv=>exportFields.map(f=>{
     return String(inv.data[f.key]??'').replace(/\r?\n/g,' ');
   }).join(','));
@@ -899,10 +899,10 @@ suite('B2C: debtor_vat_number vide, debtor_code généré', ()=>{
 // ── Simulation CSV B2C seul ───────────────────────────
 suite('CSV simulation — B2C seul', ()=>{
   const {header,rows,exportFields}=simulateBuildCSV([{data:b2cData,status:'validated'}]);
-  test('Colonne creditor_vat présente',        header.includes('N° TVA créancier'), true);
+  test('Colonne creditor_vat présente',        header.includes('creditor_vat_number'), true);
   // Pas de colonne debtor_vat (aucune facture n'en a)
-  test('Colonne debtor_vat absente (B2C pur)', header.includes('N° TVA débiteur'),  false);
-  test('Colonne debtor_code présente',         header.includes('Code débiteur'),    true);
+  test('Colonne debtor_vat absente (B2C pur)', header.includes('debtor_vat_number'),  false);
+  test('Colonne debtor_code présente',         header.includes('debtor_code'),    true);
   const row=rows[0].split(',');
   const codeIdx=exportFields.findIndex(f=>f.key==='debtor_code');
   test('debtor_code = code généré dans CSV',   row[codeIdx], b2cData.debtor_code);
@@ -914,9 +914,9 @@ suite('CSV simulation — B2C seul', ()=>{
 // ── Simulation CSV B2B seul ───────────────────────────
 suite('CSV simulation — B2B seul', ()=>{
   const {header,rows,exportFields}=simulateBuildCSV([{data:b2bData,status:'validated'}]);
-  test('Colonne creditor_vat présente',          header.includes('N° TVA créancier'), true);
-  test('Colonne debtor_vat absente (jamais CSV)', header.includes('N° TVA débiteur'),  false);
-  test('Colonne debtor_code présente',           header.includes('Code débiteur'),    true);
+  test('Colonne creditor_vat présente',          header.includes('creditor_vat_number'), true);
+  test('Colonne debtor_vat absente (jamais CSV)', header.includes('debtor_vat_number'),  false);
+  test('Colonne debtor_code présente',           header.includes('debtor_code'),    true);
   const row=rows[0].split(',');
   const codeIdx=exportFields.findIndex(f=>f.key==='debtor_code');
   test('debtor_code = DE123456789 dans CSV',     row[codeIdx], 'DE123456789');
@@ -928,8 +928,8 @@ suite('CSV simulation — B2B seul', ()=>{
 // ── Simulation CSV mixte B2C + B2B ───────────────────
 suite('CSV simulation — mix B2C + B2B', ()=>{
   const {header,rows,exportFields}=simulateBuildCSV([{data:b2cData,status:'validated'},{data:b2bData,status:'validated'}]);
-  test('Mix: colonne debtor_vat absente',       header.includes('N° TVA débiteur'), false);
-  test('Mix: colonne debtor_code présente',     header.includes('Code débiteur'),   true);
+  test('Mix: colonne debtor_vat absente',       header.includes('debtor_vat_number'), false);
+  test('Mix: colonne debtor_code présente',     header.includes('debtor_code'),   true);
   const codeIdx=exportFields.findIndex(f=>f.key==='debtor_code');
   // B2C row: debtor_code = generated code
   const b2cRow=rows[0].split(',');
@@ -947,12 +947,12 @@ suite('Fix: activeVAT scan sur factures validées seulement', ()=>{
   const skippedWithVAT={data:{...b2cData,debtor_vat_number:'DE123456789'},status:'skipped'};
   const validatedNoVAT={data:{...b2cData,debtor_vat_number:null},status:'validated'};
   const {header}=simulateBuildCSV([skippedWithVAT,validatedNoVAT]);
-  test('TVA débiteur ignorée: jamais de colonne debtor_vat', header.includes('N° TVA débiteur'), false);
+  test('TVA débiteur ignorée: jamais de colonne debtor_vat', header.includes('debtor_vat_number'), false);
   const validatedWithVAT={data:{...b2bData},status:'validated'};
   const skippedNoVAT={data:{...b2cData},status:'skipped'};
   const {header:h2}=simulateBuildCSV([validatedWithVAT,skippedNoVAT]);
-  test('TVA débiteur validée B2B: toujours pas de colonne debtor_vat', h2.includes('N° TVA débiteur'), false);
-  test('debtor_code présent même sans colonne debtor_vat', h2.includes('Code débiteur'), true);
+  test('TVA débiteur validée B2B: toujours pas de colonne debtor_vat', h2.includes('debtor_vat_number'), false);
+  test('debtor_code présent même sans colonne debtor_vat', h2.includes('debtor_code'), true);
 });
 
 suite('CSV: export vide (aucune facture validée)', ()=>{
@@ -1170,7 +1170,7 @@ suite('Risque 1b: CSV B2C ne doit pas contenir debtor_vat', ()=>{
   const inv={data:{...baseOK,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789',debtor_code:'ACMPAR12R750'},errors:{},debtorType:'particulier',status:'validated'};
   checkFields(inv);
   const {header,rows,exportFields}=simulateBuildCSV([inv]);
-  test('Colonne debtor_vat absente pour B2C pur',  header.includes('N° TVA débiteur'), false);
+  test('Colonne debtor_vat absente pour B2C pur',  header.includes('debtor_vat_number'), false);
   test('Valeur toujours présente dans les données', inv.data.debtor_vat_number, 'DE123456789');
   // Si la colonne était présente, la cellule serait vide
   const dVatIdx=exportFields.findIndex(f=>f.key==='debtor_vat_number');
@@ -1295,7 +1295,7 @@ suite('CSV: N° TVA débiteur jamais dans le CSV — Code débiteur en position 
   const b2bInv={data:{...base,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789',debtor_code:'DE123456789'},debtorType:'entreprise',status:'validated'};
   const {exportFields:ef1,header:h1}=simulateBuildCSV([b2bInv]);
   test('B2B seul: debtor_vat absent', ef1.findIndex(f=>f.key==='debtor_vat_number'), -1);
-  test('B2B seul: Code débiteur présent', h1.includes('Code débiteur'), true);
+  test('B2B seul: Code débiteur présent', h1.includes('debtor_code'), true);
   test('B2B seul: Code débiteur = dernier champ', ef1[ef1.length-1].key, 'debtor_code');
 
   // B2C only

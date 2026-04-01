@@ -1035,7 +1035,7 @@ function buildCSV(){
   // N° TVA débiteur is never exported — debtor_code already carries that value for B2B
   const activeVAT=VAT_FIELDS.filter(f=>f.key!=='debtor_vat_number'&&validated.some(inv=>inv.data[f.key]));
   const exportFields=[...S.fields,...activeVAT,{key:'debtor_code',label:'Code débiteur'}];
-  const header=exportFields.map(f=>`"${f.label}"`).join(',');
+  const header=exportFields.map(f=>`"${f.key}"`).join(',');
   const rows=validated.map(inv=>exportFields.map(f=>{
     const v=inv.data[f.key]??'';
     return'"'+String(v).replace(/"/g,'""').replace(/\r?\n/g,' ')+'"';
