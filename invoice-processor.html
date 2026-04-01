@@ -534,7 +534,7 @@ function switchVATValues(data){const tmp=data.creditor_vat_number;data.creditor_
 function hasDuplicateVAT(c,d){if(!c||!d)return false;const nc=normalizeVAT(c),nd=normalizeVAT(d);return !!(nc&&nd&&nc===nd);}
 
 /* ══ DEBTOR CODE ══════════════════════════════════════ */
-const DEBTOR_CODE_SOURCES=['debtor_company_name','debtor_post_city','debtor_post_street_1','debtor_post_postalcode'];
+const DEBTOR_CODE_SOURCES=['debtor_lastname','debtor_post_city','debtor_post_street_1','debtor_post_postalcode'];
 function extractCode(str,n=3){if(!str)return 'X'.repeat(n);const s=String(str).toUpperCase().replace(/[^A-Z0-9]/g,'');return(s.slice(0,n)||'').padEnd(n,'X');}
 function generateDebtorCode(data){return DEBTOR_CODE_SOURCES.map(k=>extractCode(data[k],3)).join('');}
 function computeDebtorCode(data){const vatState=resolveVATAssignment(data.creditor_vat_number,data.debtor_vat_number);if(vatState==='both'||vatState==='debtor_only')return normalizeVAT(data.debtor_vat_number);return generateDebtorCode(data);}
@@ -553,7 +553,7 @@ function getDebtorCodeState(data,debtorType){
 /* ══ STATE ══════════════════════════════════════════ */
 const S = {
   fields:[
-    {label:'Nom du débiteur',    key:'debtor_company_name',          type:'text',   required:true},
+    {label:'Nom / Prénom',       key:'debtor_lastname',              type:'text',   required:true},
     {label:'Adresse',            key:'debtor_post_street_1',         type:'text',   required:true},
     {label:'Code postal',        key:'debtor_post_postalcode',       type:'text',   required:true},
     {label:'Ville',              key:'debtor_post_city',             type:'text',   required:true},
@@ -561,11 +561,10 @@ const S = {
     {label:'N° de facture',      key:'invoice_number',               type:'text',   required:true},
     {label:'Date émission',      key:'invoice_date',                 type:'date',   required:true},
     {label:'Échéance',           key:'invoice_due_date',             type:'date',   required:true},
-    {label:'Montant TTC',        key:'amount_ttc',                   type:'number', required:true},
     {label:'Montant total',      key:'invoice_total_amount_inc_vat', type:'number', required:true},
     {label:'Montant en suspens', key:'invoice_open_amount_inc_vat',  type:'number', required:true},
   ],
-  nomenclature:['debtor_company_name','invoice_number'], nomSep:'_',
+  nomenclature:['debtor_lastname','invoice_number'], nomSep:'_',
   files:[], invoices:[], cur:-1, busy:false, zipDownloaded:false,
 };
 
@@ -1034,12 +1033,18 @@ function buildCSV(){
   const validated=S.invoices.filter(i=>i.status==='validated');
   // N° TVA débiteur is never exported — debtor_code already carries that value for B2B
   const activeVAT=VAT_FIELDS.filter(f=>f.key!=='debtor_vat_number'&&validated.some(inv=>inv.data[f.key]));
-  const exportFields=[...S.fields,...activeVAT,{key:'debtor_code',label:'Code débiteur'}];
-  const header=exportFields.map(f=>`"${f.key}"`).join(',');
+  const EMPTY_COLS=['administration_code','debtor_invoice_email','debtor_reminder_email','debtor_sms_number','debtor_origin_id'].map(k=>({key:k,label:k}));
+  const firstField=S.fields[0]; // debtor_lastname
+  const restFields=S.fields.slice(1);
+  const debtorCodeField={key:'debtor_code',label:'debtor_code'};
+  const exportFields=[firstField,debtorCodeField,...restFields,...activeVAT,...EMPTY_COLS];
+  const header=exportFields.map(f=>`"${f.key}"`).join(';');
   const rows=validated.map(inv=>exportFields.map(f=>{
-    const v=inv.data[f.key]??'';
+    let v=inv.data[f.key]??'';
+    if(f.key==='debtor_code'&&!v) v=generateDebtorCode(inv.data);
+    if(EMPTY_COLS.some(c=>c.key===f.key)) v='';
     return'"'+String(v).replace(/"/g,'""').replace(/\r?\n/g,' ')+'"';
-  }).join(','));
+  }).join(';'));
   return [header,...rows].join('\n');
 }
 function exportCSV(){dlBlob(new Blob(['\uFEFF'+buildCSV()],{type:'text/csv;charset=utf-8;'}),'factures.csv');}

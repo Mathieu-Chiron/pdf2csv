@@ -54,7 +54,7 @@ function vandn(value, f) {
 }
 
 const FIELDS = [
-  {label:'Nom du débiteur',    key:'debtor_company_name',          type:'text',   required:true},
+  {label:'Nom / Prénom',       key:'debtor_lastname',              type:'text',   required:true},
   {label:'Adresse',            key:'debtor_post_street_1',         type:'text',   required:true},
   {label:'Code postal',        key:'debtor_post_postalcode',       type:'text',   required:true},
   {label:'Ville',              key:'debtor_post_city',             type:'text',   required:true},
@@ -62,7 +62,6 @@ const FIELDS = [
   {label:'N° de facture',      key:'invoice_number',               type:'text',   required:true},
   {label:'Date émission',      key:'invoice_date',                 type:'date',   required:true},
   {label:'Échéance',           key:'invoice_due_date',             type:'date',   required:true},
-  {label:'Montant TTC',        key:'amount_ttc',                   type:'number', required:true},
   {label:'Montant total',      key:'invoice_total_amount_inc_vat', type:'number', required:true},
   {label:'Montant en suspens', key:'invoice_open_amount_inc_vat',  type:'number', required:true},
 ];
@@ -114,7 +113,7 @@ const pend = name=>({file:{name},status:'pending'});
 const extr = name=>({file:{name},status:'extracted'});
 
 const fullData = {
-  debtor_company_name:'ACME SAS',debtor_post_street_1:'12 rue de la Paix',
+  debtor_lastname:'ACME SAS',debtor_post_street_1:'12 rue de la Paix',
   debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',
   invoice_number:'F-2024-001',invoice_date:'2024-03-15',invoice_due_date:'2024-04-15',
   amount_ttc:'1500.50',invoice_total_amount_inc_vat:'1500.50',invoice_open_amount_inc_vat:'250.00',
@@ -236,7 +235,7 @@ function getActiveVATFields(invoices,vatFields){
 }
 
 /* ══ DEBTOR CODE ══════════════════════════════════════ */
-const DEBTOR_CODE_SOURCES=['debtor_company_name','debtor_post_city','debtor_post_street_1','debtor_post_postalcode'];
+const DEBTOR_CODE_SOURCES=['debtor_lastname','debtor_post_city','debtor_post_street_1','debtor_post_postalcode'];
 
 function extractCode(str,n=3){
   if(!str) return 'X'.repeat(n);
@@ -326,10 +325,10 @@ suite('normalizeAmount', ()=>{
 
 suite('parseJSON', ()=>{
   const p=r=>{const x=parseJSON(r);return{ok:x.ok,data:x.data};};
-  test('JSON propre',       p('{"debtor_company_name":"ACME"}'),          {ok:true,data:{debtor_company_name:'ACME'}});
-  test('Backticks',         p('```json\n{"debtor_company_name":"ACME"}\n```'), {ok:true,data:{debtor_company_name:'ACME'}});
-  test('Texte autour',      p('Voici:\n{"debtor_company_name":"ACME"}\nMerci.'), {ok:true,data:{debtor_company_name:'ACME'}});
-  test('Virgule finale',    p('{"debtor_company_name":"ACME",}'),         {ok:true,data:{debtor_company_name:'ACME'}});
+  test('JSON propre',       p('{"debtor_lastname":"ACME"}'),          {ok:true,data:{debtor_lastname:'ACME'}});
+  test('Backticks',         p('```json\n{"debtor_lastname":"ACME"}\n```'), {ok:true,data:{debtor_lastname:'ACME'}});
+  test('Texte autour',      p('Voici:\n{"debtor_lastname":"ACME"}\nMerci.'), {ok:true,data:{debtor_lastname:'ACME'}});
+  test('Virgule finale',    p('{"debtor_lastname":"ACME",}'),         {ok:true,data:{debtor_lastname:'ACME'}});
   test('Vide → false',      parseJSON('').ok,                             false);
   test('Pas de JSON → false', parseJSON('Désolé.').ok,                   false);
 });
@@ -350,23 +349,23 @@ suite('vandn — champs valides', ()=>{
 
 suite('checkFields', ()=>{
   test('Tous champs valides',       checkFields(makeInvoice('extracted',JSON.parse(JSON.stringify(fullData)))), true);
-  test('Nom manquant',              checkFields(makeInvoice('extracted',{...fullData,debtor_company_name:null})), false);
+  test('Nom manquant',              checkFields(makeInvoice('extracted',{...fullData,debtor_lastname:null})), false);
   test('Date invalide',             checkFields(makeInvoice('extracted',{...fullData,invoice_date:'not-a-date'})), false);
   test('Facture ignorée complète',  checkFields(makeInvoice('skipped',JSON.parse(JSON.stringify(fullData)))), true);
   test('Facture ignorée vide',      checkFields(makeInvoice('skipped',{})), false);
-  const inv2=makeInvoice('extracted',{...fullData,debtor_company_name:null});checkFields(inv2);
-  test('Erreurs enregistrées',      inv2.errors.debtor_company_name, 'Champ requis');
+  const inv2=makeInvoice('extracted',{...fullData,debtor_lastname:null});checkFields(inv2);
+  test('Erreurs enregistrées',      inv2.errors.debtor_lastname, 'Champ requis');
 });
 
 suite('onFI — reset statut', ()=>{
-  test('skipped → extracted',  simulateOnFI(makeInvoice('skipped',fullData),'debtor_company_name','X').status, 'extracted');
-  test('validated → extracted',simulateOnFI(makeInvoice('validated',fullData),'debtor_company_name','X').status,'extracted');
-  test('extracted → extracted',simulateOnFI(makeInvoice('extracted',fullData),'debtor_company_name','X').status,'extracted');
-  test('pending → pending',    simulateOnFI(makeInvoice('pending',{}),'debtor_company_name','X').status,'pending');
-  const i2=makeInvoice('extracted',fullData);simulateOnFI(i2,'debtor_company_name','Nouveau');
-  test('Valeur mise à jour',   i2.data.debtor_company_name, 'Nouveau');
-  const i3={...makeInvoice('extracted',fullData),errors:{debtor_company_name:'Champ requis'}};simulateOnFI(i3,'debtor_company_name','X');
-  test('Erreur effacée',       i3.errors.debtor_company_name, undefined);
+  test('skipped → extracted',  simulateOnFI(makeInvoice('skipped',fullData),'debtor_lastname','X').status, 'extracted');
+  test('validated → extracted',simulateOnFI(makeInvoice('validated',fullData),'debtor_lastname','X').status,'extracted');
+  test('extracted → extracted',simulateOnFI(makeInvoice('extracted',fullData),'debtor_lastname','X').status,'extracted');
+  test('pending → pending',    simulateOnFI(makeInvoice('pending',{}),'debtor_lastname','X').status,'pending');
+  const i2=makeInvoice('extracted',fullData);simulateOnFI(i2,'debtor_lastname','Nouveau');
+  test('Valeur mise à jour',   i2.data.debtor_lastname, 'Nouveau');
+  const i3={...makeInvoice('extracted',fullData),errors:{debtor_lastname:'Champ requis'}};simulateOnFI(i3,'debtor_lastname','X');
+  test('Erreur effacée',       i3.errors.debtor_lastname, undefined);
 });
 
 suite('getButtonLabel', ()=>{
@@ -407,15 +406,15 @@ suite('detectDuplicates', ()=>{
 
 suite('simulatePreExportCheck', ()=>{
   test('Tout valide → export',      simulatePreExportCheck(makeInvoice('validated',JSON.parse(JSON.stringify(fullData))),[makeInvoice('validated',fullData)]),{blocked:false});
-  const i2=makeInvoice('validated',{...fullData,debtor_company_name:null});
+  const i2=makeInvoice('validated',{...fullData,debtor_lastname:null});
   test('Champ manquant → bloqué',   simulatePreExportCheck(i2,[]).blocked, true);
-  test('Champ manquant → raison',   simulatePreExportCheck(makeInvoice('validated',{...fullData,debtor_company_name:null}),[]).reason,'missing_fields');
+  test('Champ manquant → raison',   simulatePreExportCheck(makeInvoice('validated',{...fullData,debtor_lastname:null}),[]).reason,'missing_fields');
   const i3=makeInvoice('validated',JSON.parse(JSON.stringify(fullData)));
   test('Ignorées → skipped_warning',simulatePreExportCheck(i3,[makeInvoice('validated'),makeInvoice('skipped')]).reason,'skipped_warning');
 });
 
 suite('Intégration: ignorée → éditée → validée', ()=>{
-  test('Edition → extracted',       simulateOnFI(makeInvoice('skipped',fullData),'debtor_company_name','Nouveau').status,'extracted');
+  test('Edition → extracted',       simulateOnFI(makeInvoice('skipped',fullData),'debtor_lastname','Nouveau').status,'extracted');
   test('checkFields après édition', checkFields(makeInvoice('extracted',JSON.parse(JSON.stringify(fullData)))),true);
   const i=makeInvoice('extracted',JSON.parse(JSON.stringify(fullData)));if(checkFields(i))i.status='validated';
   test('Après validation → validated', i.status,'validated');
@@ -583,23 +582,23 @@ suite('extractCode', ()=>{
 });
 
 suite('generateDebtorCode', ()=>{
-  const d={debtor_company_name:'ACME SAS',debtor_post_city:'Paris',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001'};
+  const d={debtor_lastname:'ACME SAS',debtor_post_city:'Paris',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001'};
   test('Code complet',                 generateDebtorCode(d),            'ACMPAR12R750');
   test('Longueur = 12',               generateDebtorCode(d).length,      12);
-  const d2={...d,debtor_company_name:'AB'};
+  const d2={...d,debtor_lastname:'AB'};
   test('Nom court → padX',            generateDebtorCode(d2),            'ABXPAR12R750');
   const d3={...d,debtor_post_city:''};
   test('Ville vide → XXX',            generateDebtorCode(d3),            'ACMXXX12R750');
-  const d4={debtor_company_name:null,debtor_post_city:null,debtor_post_street_1:null,debtor_post_postalcode:null};
+  const d4={debtor_lastname:null,debtor_post_city:null,debtor_post_street_1:null,debtor_post_postalcode:null};
   test('Tout null → 12 X',            generateDebtorCode(d4),            'XXXXXXXXXXXX');
   const d5={...d,debtor_post_street_1:'Rue du Général'};
   test('Adresse sans numéro',         generateDebtorCode(d5),            'ACMPARRUE750');
-  const d6={...d,debtor_company_name:'Dupont & Fils'};
+  const d6={...d,debtor_lastname:'Dupont & Fils'};
   test('Esperluette ignorée',         generateDebtorCode(d6),            'DUPPAR12R750');
 });
 
 suite('computeDebtorCode — priorité TVA débiteur', ()=>{
-  const base={debtor_company_name:'ACME SAS',debtor_post_city:'Paris',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001'};
+  const base={debtor_lastname:'ACME SAS',debtor_post_city:'Paris',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001'};
   const withBoth={...base,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'};
   const withDebtorOnly={...base,creditor_vat_number:null,debtor_vat_number:'DE123456789'};
   const withCreditorOnly={...base,creditor_vat_number:'FR12345678901',debtor_vat_number:null};
@@ -614,9 +613,9 @@ suite('computeDebtorCode — priorité TVA débiteur', ()=>{
 });
 
 suite('computeDebtorCode — mise à jour auto sur changement de champ', ()=>{
-  const base={debtor_company_name:'ACME SAS',debtor_post_city:'Paris',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001',creditor_vat_number:null,debtor_vat_number:null};
+  const base={debtor_lastname:'ACME SAS',debtor_post_city:'Paris',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001',creditor_vat_number:null,debtor_vat_number:null};
   const before=computeDebtorCode(base);
-  const after=computeDebtorCode({...base,debtor_company_name:'Nouveau Client'});
+  const after=computeDebtorCode({...base,debtor_lastname:'Nouveau Client'});
   test('Changement nom → code change',    before!==after,  true);
   test('Nouveau code reflète le nom',     after.slice(0,3), 'NOU');
   const cityChange=computeDebtorCode({...base,debtor_post_city:'Lyon'});
@@ -630,7 +629,7 @@ suite('computeDebtorCode — mise à jour auto sur changement de champ', ()=>{
   test('Ajout TVA débiteur → bascule vers TVA', vatAdded, 'IT12345678901');
 });
 
-const baseData={debtor_company_name:'ACME SAS',debtor_post_city:'Paris',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001'};
+const baseData={debtor_lastname:'ACME SAS',debtor_post_city:'Paris',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001'};
 const withBothVAT={...baseData,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'};
 const withDebtorVAT={...baseData,creditor_vat_number:null,debtor_vat_number:'DE123456789'};
 const withCreditorVAT={...baseData,creditor_vat_number:'FR12345678901',debtor_vat_number:null};
@@ -704,7 +703,7 @@ suite('getDebtorCodeState — aucune TVA + entreprise', ()=>{
   test('vatRequired',          s.vatRequired,  true);
   test('showDebtorVat',        s.showDebtorVatField, true);
   // Mise à jour dynamique du code quand nom change
-  const renamed={...withNoVAT,debtor_company_name:'DUPONT SA'};
+  const renamed={...withNoVAT,debtor_lastname:'DUPONT SA'};
   test('Code se met à jour si nom change', getDebtorCodeState(renamed,'entreprise').code.slice(0,3), 'DUP');
 });
 
@@ -724,7 +723,7 @@ suite('Validation: blocage si entreprise sans TVA débiteur', ()=>{
 });
 
 suite('checkFields: TVA créancier toujours obligatoire', ()=>{
-  const base={debtor_company_name:'ACME SAS',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-001',invoice_date:'2024-03-15',invoice_due_date:'2024-04-15',amount_ttc:'1500',invoice_total_amount_inc_vat:'1500',invoice_open_amount_inc_vat:'250'};
+  const base={debtor_lastname:'ACME SAS',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-001',invoice_date:'2024-03-15',invoice_due_date:'2024-04-15',amount_ttc:'1500',invoice_total_amount_inc_vat:'1500',invoice_open_amount_inc_vat:'250'};
   // Sans TVA créancier → bloqué
   const i1={data:{...base,creditor_vat_number:null,debtor_vat_number:null},errors:{},debtorType:null};
   checkFields(i1);
@@ -745,7 +744,7 @@ suite('checkFields: TVA créancier toujours obligatoire', ()=>{
 
 /* ══ RISK: TVA créancier toujours obligatoire ════════════ */
 
-const baseOK={debtor_company_name:'ACME SAS',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-001',invoice_date:'2024-03-15',invoice_due_date:'2024-04-15',amount_ttc:'1500',invoice_total_amount_inc_vat:'1500',invoice_open_amount_inc_vat:'250'};
+const baseOK={debtor_lastname:'ACME SAS',debtor_post_street_1:'12 rue de la Paix',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-001',invoice_date:'2024-03-15',invoice_due_date:'2024-04-15',amount_ttc:'1500',invoice_total_amount_inc_vat:'1500',invoice_open_amount_inc_vat:'250'};
 
 suite('Risque: switch laisse créancier null → hint UI disponible', ()=>{
   // Avant switch: créancier valide, débiteur null
@@ -832,21 +831,28 @@ suite('Risque: checkFields idempotent (double appel sans corruption)', ()=>{
 
 // Helper: mirrors buildCSV — scans only validated invoices for VAT columns
 // N° TVA débiteur is never exported — debtor_code already carries that value for B2B
+const EMPTY_COLS_SIM=['administration_code','debtor_invoice_email','debtor_reminder_email','debtor_sms_number','debtor_origin_id'].map(k=>({key:k,label:k}));
 const VAT_FIELDS_SIM=[{key:'creditor_vat_number',label:'N° TVA créancier'}];
 function simulateBuildCSV(invoices){
   const validated=invoices.filter(i=>i.status==='validated');
   const activeVAT=VAT_FIELDS_SIM.filter(f=>validated.some(inv=>inv.data&&inv.data[f.key]));
-  const exportFields=[...FIELDS,...activeVAT,{key:'debtor_code',label:'Code débiteur'}];
-  const header=exportFields.map(f=>f.key).join(',');
+  const firstField=FIELDS[0]; // debtor_lastname
+  const restFields=FIELDS.slice(1);
+  const debtorCodeField={key:'debtor_code',label:'debtor_code'};
+  const exportFields=[firstField,debtorCodeField,...restFields,...activeVAT,...EMPTY_COLS_SIM];
+  const header=exportFields.map(f=>f.key).join(';');
   const rows=validated.map(inv=>exportFields.map(f=>{
-    return String(inv.data[f.key]??'').replace(/\r?\n/g,' ');
-  }).join(','));
+    let v=String(inv.data[f.key]??'').replace(/\r?\n/g,' ');
+    if(f.key==='debtor_code'&&!v) v=generateDebtorCode(inv.data);
+    if(EMPTY_COLS_SIM.some(c=>c.key===f.key)) v='';
+    return v;
+  }).join(';'));
   return{header,rows,exportFields,csv:[header,...rows].join('\n')};
 }
 
 // ── Placeholder data ──────────────────────────────────
 const b2cRaw={
-  debtor_company_name:'Jean Dupont',debtor_post_street_1:'12 rue des Lilas',
+  debtor_lastname:'Jean Dupont',debtor_post_street_1:'12 rue des Lilas',
   debtor_post_postalcode:'69001',debtor_post_city:'Lyon',debtor_post_country_code:'France',
   invoice_number:'F-2024-042',invoice_date:'2024-06-01',invoice_due_date:'2024-07-01',
   amount_ttc:250,invoice_total_amount_inc_vat:250,invoice_open_amount_inc_vat:250,
@@ -855,7 +861,7 @@ const b2cRaw={
 const b2cData={...b2cRaw,debtor_code:computeDebtorCode(b2cRaw)};
 
 const b2bRaw={
-  debtor_company_name:'ACME SAS',debtor_post_street_1:'5 avenue de la République',
+  debtor_lastname:'ACME SAS',debtor_post_street_1:'5 avenue de la République',
   debtor_post_postalcode:'75011',debtor_post_city:'Paris',debtor_post_country_code:'France',
   invoice_number:'F-2024-043',invoice_date:'2024-06-02',invoice_due_date:'2024-07-02',
   amount_ttc:1200,invoice_total_amount_inc_vat:1200,invoice_open_amount_inc_vat:1200,
@@ -903,7 +909,7 @@ suite('CSV simulation — B2C seul', ()=>{
   // Pas de colonne debtor_vat (aucune facture n'en a)
   test('Colonne debtor_vat absente (B2C pur)', header.includes('debtor_vat_number'),  false);
   test('Colonne debtor_code présente',         header.includes('debtor_code'),    true);
-  const row=rows[0].split(',');
+  const row=rows[0].split(';');
   const codeIdx=exportFields.findIndex(f=>f.key==='debtor_code');
   test('debtor_code = code généré dans CSV',   row[codeIdx], b2cData.debtor_code);
   const vatIdx=exportFields.findIndex(f=>f.key==='creditor_vat_number');
@@ -917,7 +923,7 @@ suite('CSV simulation — B2B seul', ()=>{
   test('Colonne creditor_vat présente',          header.includes('creditor_vat_number'), true);
   test('Colonne debtor_vat absente (jamais CSV)', header.includes('debtor_vat_number'),  false);
   test('Colonne debtor_code présente',           header.includes('debtor_code'),    true);
-  const row=rows[0].split(',');
+  const row=rows[0].split(';');
   const codeIdx=exportFields.findIndex(f=>f.key==='debtor_code');
   test('debtor_code = DE123456789 dans CSV',     row[codeIdx], 'DE123456789');
   // debtor_code equals the debtor VAT for B2B — no separate column needed
@@ -932,10 +938,10 @@ suite('CSV simulation — mix B2C + B2B', ()=>{
   test('Mix: colonne debtor_code présente',     header.includes('debtor_code'),   true);
   const codeIdx=exportFields.findIndex(f=>f.key==='debtor_code');
   // B2C row: debtor_code = generated code
-  const b2cRow=rows[0].split(',');
+  const b2cRow=rows[0].split(';');
   test('Mix: B2C debtor_code = généré',         b2cRow[codeIdx], b2cData.debtor_code);
   // B2B row: debtor_code = debtor VAT
-  const b2bRow=rows[1].split(',');
+  const b2bRow=rows[1].split(';');
   test('Mix: B2B debtor_code = DE123456789',    b2bRow[codeIdx], 'DE123456789');
   console.log('\n  [CSV MIXTE]\n  '+header+'\n  '+rows[0]+'\n  '+rows[1]);
 });
@@ -965,13 +971,13 @@ suite('CSV: export vide (aucune facture validée)', ()=>{
 suite('CSV: valeurs avec virgules → gérées par les guillemets', ()=>{
   // Le simulateBuildCSV ne quote pas (test de la logique de buildCSV dans l\'app)
   // On vérifie que la valeur brute avec virgule est bien dans le champ
-  const invWithComma={data:{...b2cData,debtor_company_name:'Dupont, Jean'},status:'validated'};
+  const invWithComma={data:{...b2cData,debtor_lastname:'Dupont, Jean'},status:'validated'};
   const {rows,exportFields}=simulateBuildCSV([invWithComma]);
-  const nameIdx=exportFields.findIndex(f=>f.key==='debtor_company_name');
+  const nameIdx=exportFields.findIndex(f=>f.key==='debtor_lastname');
   // Dans notre simulateur les valeurs ne sont pas quotées — on vérifie que la valeur est correcte
-  test('Valeur avec virgule stockée correctement', invWithComma.data.debtor_company_name, 'Dupont, Jean');
+  test('Valeur avec virgule stockée correctement', invWithComma.data.debtor_lastname, 'Dupont, Jean');
   // Dans buildCSV réel, la valeur serait "Dupont, Jean" (quotée) — on simule ici
-  const csvVal='"'+String(invWithComma.data.debtor_company_name).replace(/"/g,'""')+'"';
+  const csvVal='"'+String(invWithComma.data.debtor_lastname).replace(/"/g,'""')+'"';
   test('buildCSV quote la valeur avec virgule', csvVal, '"Dupont, Jean"');
 });
 
@@ -993,15 +999,15 @@ suite('CSV: valeurs avec sauts de ligne → remplacés par espace', ()=>{
   const invWithNewline={data:{...b2cData,debtor_post_street_1:'12 rue\nde la Paix'},status:'validated'};
   const {rows,exportFields}=simulateBuildCSV([invWithNewline]);
   const streetIdx=exportFields.findIndex(f=>f.key==='debtor_post_street_1');
-  test('Saut de ligne dans adresse → remplacé dans CSV', rows[0].split(',')[streetIdx], '12 rue de la Paix');
+  test('Saut de ligne dans adresse → remplacé dans CSV', rows[0].split(';')[streetIdx], '12 rue de la Paix');
   test('CSV ne contient pas de saut de ligne parasite',  rows[0].includes('\n'), false);
 });
 
-suite('CSV: debtor_code null → chaîne vide dans CSV', ()=>{
+suite('CSV: debtor_code null → fallback generateDebtorCode dans CSV', ()=>{
   const invNullCode={data:{...b2cData,debtor_code:null},status:'validated'};
   const {rows,exportFields}=simulateBuildCSV([invNullCode]);
   const codeIdx=exportFields.findIndex(f=>f.key==='debtor_code');
-  test('debtor_code null → vide dans CSV', rows[0].split(',')[codeIdx], '');
+  test('debtor_code null → generateDebtorCode dans CSV', rows[0].split(';')[codeIdx], generateDebtorCode(b2cData));
 });
 
 suite('CSV: toutes les factures validées sont exportées', ()=>{
@@ -1088,7 +1094,7 @@ suite('setDebtorType: basculement B2B→B2C→B2B conserve TVA débiteur', ()=>{
 
 /* ══ MESSAGES D'ERREUR SPÉCIFIQUES ══════════════════ */
 
-const baseValid={debtor_company_name:'ACME',debtor_post_street_1:'1 rue A',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-001',invoice_date:'2024-01-01',invoice_due_date:'2024-02-01',amount_ttc:'100',invoice_total_amount_inc_vat:'100',invoice_open_amount_inc_vat:'100'};
+const baseValid={debtor_lastname:'ACME',debtor_post_street_1:'1 rue A',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-001',invoice_date:'2024-01-01',invoice_due_date:'2024-02-01',amount_ttc:'100',invoice_total_amount_inc_vat:'100',invoice_open_amount_inc_vat:'100'};
 
 suite('Erreur: TVA créancier vide → message "requis"', ()=>{
   const inv={data:{...baseValid,creditor_vat_number:null,debtor_vat_number:null},errors:{},debtorType:'particulier'};
@@ -1232,8 +1238,8 @@ suite('Risque 6: debtor_vat jamais dans CSV — debtor_code encode la valeur', (
   test('Colonne debtor_vat absente (jamais dans CSV)',            dVatIdx, -1);
   test('Valeur IT... toujours présente dans les données B2C',    b2cInv.data.debtor_vat_number, 'IT12345678901');
   const codeIdx=exportFields.findIndex(f=>f.key==='debtor_code');
-  const b2cRow=rows[0].split(',');
-  const b2bRow=rows[1].split(',');
+  const b2cRow=rows[0].split(';');
+  const b2bRow=rows[1].split(';');
   test('B2C debtor_code = code généré',                          b2cRow[codeIdx], 'JEALYO12R690');
   test('B2B debtor_code = TVA débiteur',                         b2bRow[codeIdx], 'DE123456789');
 });
@@ -1243,7 +1249,7 @@ suite('Risque 6: debtor_vat jamais dans CSV — debtor_code encode la valeur', (
 suite('Simulation: B2B (TVA connue) → clic B2C → reclic B2B → CSV', ()=>{
   const inv={
     data:{
-      debtor_company_name:'ACME SAS',debtor_post_street_1:'5 avenue de la République',
+      debtor_lastname:'ACME SAS',debtor_post_street_1:'5 avenue de la République',
       debtor_post_postalcode:'75011',debtor_post_city:'Paris',debtor_post_country_code:'France',
       invoice_number:'F-2024-099',invoice_date:'2024-06-01',invoice_due_date:'2024-07-01',
       amount_ttc:1200,invoice_total_amount_inc_vat:1200,invoice_open_amount_inc_vat:1200,
@@ -1280,7 +1286,7 @@ suite('Simulation: B2B (TVA connue) → clic B2C → reclic B2B → CSV', ()=>{
   const {header,rows,exportFields}=simulateBuildCSV([inv]);
   const dVatIdx=exportFields.findIndex(f=>f.key==='debtor_vat_number');
   const codeIdx=exportFields.findIndex(f=>f.key==='debtor_code');
-  const row=rows[0].split(',');
+  const row=rows[0].split(';');
   test('[4] CSV: colonne debtor_vat absente',              dVatIdx, -1);
   test('[4] CSV: debtor_code = DE123456789 (TVA initiale)',row[codeIdx], 'DE123456789');
   console.log('\n  '+header);
@@ -1290,30 +1296,30 @@ suite('Simulation: B2B (TVA connue) → clic B2C → reclic B2B → CSV', ()=>{
 /* ══ CSV COLUMN ORDER — debtor_vat never exported ═══ */
 
 suite('CSV: N° TVA débiteur jamais dans le CSV — Code débiteur en position fixe', ()=>{
-  const base={debtor_company_name:'Test SA',debtor_post_street_1:'1 rue Test',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-001',invoice_date:'2024-01-01',invoice_due_date:'2024-02-01',amount_ttc:'100',invoice_total_amount_inc_vat:'100',invoice_open_amount_inc_vat:'100'};
+  const base={debtor_lastname:'Test SA',debtor_post_street_1:'1 rue Test',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-001',invoice_date:'2024-01-01',invoice_due_date:'2024-02-01',amount_ttc:'100',invoice_total_amount_inc_vat:'100',invoice_open_amount_inc_vat:'100'};
   // B2B only
   const b2bInv={data:{...base,creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789',debtor_code:'DE123456789'},debtorType:'entreprise',status:'validated'};
   const {exportFields:ef1,header:h1}=simulateBuildCSV([b2bInv]);
   test('B2B seul: debtor_vat absent', ef1.findIndex(f=>f.key==='debtor_vat_number'), -1);
   test('B2B seul: Code débiteur présent', h1.includes('debtor_code'), true);
-  test('B2B seul: Code débiteur = dernier champ', ef1[ef1.length-1].key, 'debtor_code');
+  test('B2B seul: Code débiteur en position 2 (index 1)', ef1[1].key, 'debtor_code');
 
   // B2C only
   const b2cInv={data:{...base,creditor_vat_number:'FR12345678901',debtor_vat_number:null,debtor_code:'TESPAR1R750'},debtorType:'particulier',status:'validated'};
   const {exportFields:ef2}=simulateBuildCSV([b2cInv]);
   test('B2C seul: debtor_vat absent', ef2.findIndex(f=>f.key==='debtor_vat_number'), -1);
-  test('B2C seul: Code débiteur = dernier champ', ef2[ef2.length-1].key, 'debtor_code');
+  test('B2C seul: Code débiteur en position 2 (index 1)', ef2[1].key, 'debtor_code');
 
   // Mixed
   const {exportFields:ef3}=simulateBuildCSV([b2cInv,b2bInv]);
   test('Mixte: debtor_vat absent', ef3.findIndex(f=>f.key==='debtor_vat_number'), -1);
-  test('Mixte: Code débiteur = dernier champ (position fixe)', ef3[ef3.length-1].key, 'debtor_code');
+  test('Mixte: Code débiteur en position 2 (index 1)', ef3[1].key, 'debtor_code');
 });
 
 /* ══ BUG: FR123456789 REJETÉE — FORMAT INCOMPLET ════ */
 
 // Shared base for bug tests (also used by later suites)
-const bugBase={debtor_company_name:'Test SA',debtor_post_street_1:'1 rue Test',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-999',invoice_date:'2024-01-01',invoice_due_date:'2024-02-01',amount_ttc:'100',invoice_total_amount_inc_vat:'100',invoice_open_amount_inc_vat:'100'};
+const bugBase={debtor_lastname:'Test SA',debtor_post_street_1:'1 rue Test',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-999',invoice_date:'2024-01-01',invoice_due_date:'2024-02-01',amount_ttc:'100',invoice_total_amount_inc_vat:'100',invoice_open_amount_inc_vat:'100'};
 function bugInv(vat){return{data:{...bugBase,creditor_vat_number:vat,debtor_vat_number:null},errors:{},debtorType:'particulier'};}
 
 suite('Bug: FR123456789 (11 chars) rejeté — format FR requiert 13 chars', ()=>{
