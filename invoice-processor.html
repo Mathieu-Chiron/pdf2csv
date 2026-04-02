@@ -561,7 +561,6 @@ const S = {
     {label:'N° de facture',      key:'invoice_number',               type:'text',   required:true},
     {label:'Date émission',      key:'invoice_date',                 type:'date',   required:true},
     {label:'Échéance',           key:'invoice_due_date',             type:'date',   required:true},
-    {label:'Montant TTC',        key:'amount_ttc',                   type:'number', required:true},
     {label:'Montant total',      key:'invoice_total_amount_inc_vat', type:'number', required:true},
     {label:'Montant en suspens', key:'invoice_open_amount_inc_vat',  type:'number', required:true},
   ],
@@ -1035,7 +1034,7 @@ function buildCSV(){
   // N° TVA débiteur is never exported — debtor_code already carries that value for B2B
   const activeVAT=VAT_FIELDS.filter(f=>f.key!=='debtor_vat_number'&&validated.some(inv=>inv.data[f.key]));
   const exportFields=[...S.fields,...activeVAT,{key:'debtor_code',label:'Code débiteur'}];
-  const header=exportFields.map(f=>`"${f.label}"`).join(',');
+  const header=exportFields.map(f=>`"${f.key==='creditor_vat_number'?'administration_code':f.key}"`).join(',');
   const rows=validated.map(inv=>exportFields.map(f=>{
     const v=inv.data[f.key]??'';
     return'"'+String(v).replace(/"/g,'""').replace(/\r?\n/g,' ')+'"';
