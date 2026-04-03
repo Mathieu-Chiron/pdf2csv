@@ -577,7 +577,7 @@ function handleFiles(list) {
   const pdfs=Array.from(list).filter(f=>f.type==='application/pdf'||f.name.endsWith('.pdf'));
   const firstBatch = S.invoices.length===0 && pdfs.length>0;
   const duplicates=[];
-  pdfs.forEach(f=>{ if(S.files.find(x=>x.name===f.name)){duplicates.push(f.name);}else{S.files.push(f);S.invoices.push({file:f,status:'pending',data:{},errors:{},confidence:null,rawNorm:{}});}});
+  pdfs.forEach(f=>{ if(S.files.find(x=>x.name===f.name)){duplicates.push(f.name);}else{S.files.push(f);S.invoices.push({file:f,status:'pending',data:{},errors:{},confidence:null,rawNorm:{},debtorType:'entreprise'});}});
   if(duplicates.length) showDupToast(duplicates);
   if (!pdfs.length) return;
   if (firstBatch) {
@@ -821,6 +821,7 @@ function onFI(key,val){
   if(S.cur===-1) return;
   const inv=S.invoices[S.cur];
   inv.data[key]=val;
+  if(key==='debtor_vat_number'&&val&&String(val).trim()) inv.debtorType='entreprise';
   if([...DEBTOR_CODE_SOURCES,'creditor_vat_number','debtor_vat_number'].includes(key)) renderDebtorCode(inv);
   if(inv.errors) delete inv.errors[key];
   if(inv.status==='skipped'||inv.status==='validated') {
@@ -923,6 +924,7 @@ JSON uniquement.`;
     VAT_FIELDS.forEach(f=>{const raw=parsed.data[f.key];norm[f.key]=(raw&&raw!=='null')?normalizeVAT(raw):null;});
     norm.debtor_code=computeDebtorCode(norm);
     inv.data=norm;inv.rawNorm=rawNorm;inv.repaired=parsed.repaired||false;
+    if(norm.debtor_vat_number) inv.debtorType='entreprise';
     inv.confidence=confidence(norm,S.fields);inv.status='extracted';inv.errors={};
   } catch(e){inv.status='error';inv.error=e.message;inv.data={};inv.confidence=0;}
 }
