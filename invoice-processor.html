@@ -967,7 +967,12 @@ function validateInvoice(){
   if(S.cur===-1) return;
   const inv=S.invoices[S.cur];
   const ok=checkFields(inv);
-  if(!ok){selectInv(S.cur);return;}
+  if(!ok){
+    selectInv(S.cur);
+    const firstErrKey=Object.keys(inv.errors)[0];
+    if(firstErrKey){const el=document.getElementById('fi_'+firstErrKey);if(el) el.scrollIntoView({behavior:'smooth',block:'center'});}
+    return;
+  }
   inv.status='validated';renderSidebar();renderBadges(inv);updateBar();
   const allDone=S.invoices.length>0&&S.invoices.every(x=>x.status==='validated'||x.status==='skipped');
   if(allDone){
