@@ -538,6 +538,46 @@ const VAT_FIELDS=[
   {label:'N° TVA créancier',key:'creditor_vat_number',type:'vat',required:false},
   {label:'N° TVA débiteur', key:'debtor_vat_number',  type:'vat',required:false},
 ];
+const EXPORT_SCHEMA=[
+  'administration_code',            // 1  (valeur de creditor_vat_number)
+  'debtor_company_name',            // 2
+  'debtor_code',                    // 3
+  'debtor_origin_id',               // 4
+  'debtor_post_street_1',           // 5
+  'debtor_post_postalcode',         // 6
+  'debtor_post_city',               // 7
+  'debtor_post_country_code',       // 8
+  'debtor_is_company',              // 9
+  'debtor_gender',                  // 10
+  'debtor_firstname',               // 11
+  'debtor_infix',                   // 12
+  'debtor_lastname',                // 13
+  'debtor_sms_number',              // 14
+  'debtor_phone_number',            // 15
+  'debtor_email',                   // 16
+  'debtor_invoice_email',           // 17
+  'debtor_reminder_email',          // 18
+  'invoice_number',                 // 19
+  'invoice_date',                   // 20
+  'invoice_due_date',               // 21
+  'invoice_total_amount_inc_vat',   // 22
+  'invoice_open_amount_inc_vat',    // 23
+  'invoice_flow_code',              // 24
+  'debtor_flow_code',               // 25
+  'invoice_contact_type',           // 26
+  'invoice_contact_name',           // 27
+  'invoice_contact_street',         // 28
+  'invoice_contact_postalcode',     // 29
+  'invoice_contact_city',           // 30
+  'invoice_contact_country',        // 31
+  'invoice_contact_phone',          // 32
+  'invoice_contact_mobile',         // 33
+  'invoice_contact_email',          // 34
+  'invoice_contact_invoice_email',  // 35
+  'invoice_contact_reminder_email', // 36
+  'invoice_contact_gender',         // 37
+  'invoice_contact_is_company',     // 38
+];
 function isValidVAT(str){if(!str||typeof str!=='string')return false;const s=str.replace(/[\s.\-]/g,'').toUpperCase();return Object.values(EU_VAT_PATTERNS).some(p=>p.test(s));}
 function normalizeVAT(raw){if(!raw)return null;const s=String(raw).replace(/[\s.\-]/g,'').toUpperCase();return isValidVAT(s)?s:null;}
 const VAT_HINTS={AT:{example:'ATU12345678',desc:'ATU + 8 chiffres'},BE:{example:'BE0123456789',desc:'BE + 10 chiffres'},BG:{example:'BG123456789',desc:'BG + 9 ou 10 chiffres'},HR:{example:'HR12345678901',desc:'HR + 11 chiffres'},CY:{example:'CY12345678A',desc:'CY + 8 chiffres + 1 lettre'},CZ:{example:'CZ12345678',desc:'CZ + 8 à 10 chiffres'},DK:{example:'DK12345678',desc:'DK + 8 chiffres'},EE:{example:'EE123456789',desc:'EE + 9 chiffres'},FI:{example:'FI12345678',desc:'FI + 8 chiffres'},FR:{example:'FR12345678901',desc:'FR + 2 caractères + 9 chiffres'},DE:{example:'DE123456789',desc:'DE + 9 chiffres'},EL:{example:'EL123456789',desc:'EL + 9 chiffres'},GR:{example:'EL123456789',desc:'EL + 9 chiffres (la Grèce utilise le préfixe EL)'},HU:{example:'HU12345678',desc:'HU + 8 chiffres'},IE:{example:'IE1234567A',desc:'IE + 7 chiffres + 1-2 lettres'},IT:{example:'IT12345678901',desc:'IT + 11 chiffres'},LV:{example:'LV12345678901',desc:'LV + 11 chiffres'},LT:{example:'LT123456789',desc:'LT + 9 ou 12 chiffres'},LU:{example:'LU12345678',desc:'LU + 8 chiffres'},MT:{example:'MT12345678',desc:'MT + 8 chiffres'},NL:{example:'NL123456789B01',desc:'NL + 9 chiffres + B + 2 chiffres'},PL:{example:'PL1234567890',desc:'PL + 10 chiffres'},PT:{example:'PT123456789',desc:'PT + 9 chiffres'},RO:{example:'RO12345678',desc:'RO + 2 à 10 chiffres'},SK:{example:'SK1234567890',desc:'SK + 10 chiffres'},SI:{example:'SI12345678',desc:'SI + 8 chiffres'},ES:{example:'ESA1234567B',desc:'ES + 1 caractère + 7 chiffres + 1 caractère'},SE:{example:'SE123456789012',desc:'SE + 12 chiffres'},GB:{example:'GB123456789',desc:'GB + 9 chiffres'},CHE:{example:'CHE123456789',desc:'CHE + 9 chiffres'},CH:{example:'CHE123456789',desc:'CHE + 9 chiffres (préfixe CHE, pas CH)'}};
@@ -573,9 +613,9 @@ const S = {
   fields:[
     {label:'Nom / Prénom',       key:'debtor_lastname',              type:'text',   required:true},
     {label:'Adresse',            key:'debtor_post_street_1',         type:'text',   required:true},
-    {label:'Code postal',        key:'debtor_post_postalcode',       type:'text',   required:true},
+    {label:'Code postal',        key:'debtor_post_postalcode',       type:'postal_code',   required:true},
     {label:'Ville',              key:'debtor_post_city',             type:'text',   required:true},
-    {label:'Pays',               key:'debtor_post_country_code',     type:'text',   required:true},
+    {label:'Pays',               key:'debtor_post_country_code',     type:'country_code',   required:true},
     {label:'N° de facture',      key:'invoice_number',               type:'text',   required:true},
     {label:'Date émission',      key:'invoice_date',                 type:'date',   required:true},
     {label:'Échéance',           key:'invoice_due_date',             type:'date',   required:true},
@@ -1062,15 +1102,9 @@ function snName(s){return s.replace(/[\/\\:*?"<>|]/g,'').replace(/\s+/g,'_').sli
 function getPdfFilename(inv){const num=inv.data['invoice_number'];return(num&&String(num).trim())?snName(String(num))+'.pdf':snName(inv.file.name);}
 function buildCSV(){
   const validated=S.invoices.filter(i=>i.status==='validated');
-  const EXPORT_COLS=['administration_code','debtor_code','debtor_lastname','debtor_post_street_1','debtor_post_postalcode','debtor_post_city','invoice_number','invoice_date','invoice_due_date','invoice_total_amount_inc_vat','invoice_open_amount_inc_vat','debtor_invoice_email','debtor_reminder_email','debtor_sms_number','debtor_origin_id'];
-  const EMPTY_KEYS=['debtor_invoice_email','debtor_reminder_email','debtor_sms_number','debtor_origin_id'];
-  const header=EXPORT_COLS.map(k=>`"${k}"`).join(';');
-  const rows=validated.map(inv=>EXPORT_COLS.map(k=>{
-    let v='';
-    if(k==='administration_code') v=inv.data.creditor_vat_number??'';
-    else if(k==='debtor_code') v=inv.data.debtor_code||generateDebtorCode(inv.data);
-    else if(EMPTY_KEYS.includes(k)) v='';
-    else v=inv.data[k]??'';
+  const header=EXPORT_SCHEMA.map(k=>`"${k}"`).join(',');
+  const rows=validated.map(inv=>EXPORT_SCHEMA.map(k=>{
+    const v=(k==='administration_code'?inv.data['creditor_vat_number']:inv.data[k])??'';
     return'"'+String(v).replace(/"/g,'""').replace(/\r?\n/g,' ')+'"';
   }).join(';'));
   return [header,...rows].join('\n');
