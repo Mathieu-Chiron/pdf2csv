@@ -98,6 +98,8 @@ function simulateValidation(data,fields){const errors={};let ok=true;fields.forE
 function allDone(invoices){return invoices.length>0&&invoices.every(x=>x.status==='validated'||x.status==='skipped');}
 function isFieldEmpty(inv,key){const raw=inv.data[key];return inv.status!=='pending'&&(raw==null||String(raw).trim()==='');}
 function detectDuplicates(existingNames,newNames){const duplicates=[],added=[];newNames.forEach(name=>{if(existingNames.includes(name)||added.includes(name))duplicates.push(name);else added.push(name);});return{duplicates,added};}
+const BATCH_LIMIT=20,TOTAL_LIMIT=100;
+function filterBatch(existingCount,newCount){if(newCount>BATCH_LIMIT)return{batchExceeded:true,totalExceeded:false,accepted:0};const available=TOTAL_LIMIT-existingCount;if(newCount>available)return{batchExceeded:false,totalExceeded:true,accepted:Math.max(0,available)};return{batchExceeded:false,totalExceeded:false,accepted:newCount};}
 function canShowFinishButton(invoices){if(!invoices.length)return false;return invoices.every(x=>x.status==='validated'||x.status==='skipped');}
 function shouldWarnBeforeExport(invoices){return invoices.some(x=>x.status==='skipped');}
 function getSkippedInvoices(invoices){return invoices.filter(x=>x.status==='skipped').map(x=>x.file.name);}
@@ -1496,6 +1498,24 @@ suite('Message TVA: préfixe inconnu → message générique', ()=>{
   checkFields(inv);
   test('Préfixe inconnu → message générique',
     inv.errors.creditor_vat_number?.includes('FR12345678901'), true);
+});
+
+suite('Upload limits — batch (max 20 par envoi)', ()=>{
+  test('1 fichier accepté',                   filterBatch(0,1),   {batchExceeded:false,totalExceeded:false,accepted:1});
+  test('20 fichiers acceptés (batch plein)',   filterBatch(0,20),  {batchExceeded:false,totalExceeded:false,accepted:20});
+  test('21 fichiers → batchExceeded',         filterBatch(0,21),  {batchExceeded:true, totalExceeded:false,accepted:0});
+  test('100 fichiers d\'un coup → batchExceeded', filterBatch(0,100),{batchExceeded:true,totalExceeded:false,accepted:0});
+  test('Après 20 uploadés → 20 de plus OK',   filterBatch(20,20), {batchExceeded:false,totalExceeded:false,accepted:20});
+  test('Après 20 uploadés → 21 → batchExceeded', filterBatch(20,21),{batchExceeded:true,totalExceeded:false,accepted:0});
+});
+
+suite('Upload limits — total (max 100)', ()=>{
+  test('Déjà 90 + 5 → 5 acceptés',            filterBatch(90,5),  {batchExceeded:false,totalExceeded:false,accepted:5});
+  test('Déjà 90 + 10 → 10 acceptés',          filterBatch(90,10), {batchExceeded:false,totalExceeded:false,accepted:10});
+  test('Déjà 90 + 15 → totalExceeded (10 acceptés)', filterBatch(90,15),{batchExceeded:false,totalExceeded:true,accepted:10});
+  test('Déjà 95 + 10 → totalExceeded (5 acceptés)',  filterBatch(95,10),{batchExceeded:false,totalExceeded:true,accepted:5});
+  test('Déjà 100 + 1 → totalExceeded (0 acceptés)',  filterBatch(100,1),{batchExceeded:false,totalExceeded:true,accepted:0});
+  test('Déjà 80 + 20 → 20 acceptés (limite exacte)', filterBatch(80,20),{batchExceeded:false,totalExceeded:false,accepted:20});
 });
 
 console.log(`\n${'─'.repeat(50)}`);

@@ -171,6 +171,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .dup-toast-title{font-size:13px;font-weight:500;color:var(--amber-text);margin-bottom:6px;}
 .dup-toast-body{font-size:12px;color:var(--text2);line-height:1.6;}
 .dup-toast-close{position:absolute;top:10px;right:12px;background:transparent;border:none;cursor:pointer;font-size:14px;color:var(--text3);}
+.dz-limit{font-size:15px;font-weight:600;color:var(--amber-text);background:var(--amber-bg);border:1.5px solid var(--amber);border-radius:var(--rl);padding:10px 20px;margin-top:16px;display:inline-block;}
 
 /* EXTRACT OVERLAY */
 .ov{position:absolute;inset:0;background:rgba(var(--bg),0.92);background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:20;opacity:0;pointer-events:none;transition:opacity .2s;}
@@ -244,6 +245,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     </svg>
     <div class="dz-main">Uploadez vos factures PDF</div>
     <div class="dz-hint">Glissez-déposez ou cliquez pour sélectionner</div>
+    <div class="dz-limit">Maximum 20 fichiers à la fois</div>
   </div>
   <input type="file" id="fi1" multiple accept=".pdf" style="display:none;" onchange="handleFiles(this.files)"/>
 </div>
@@ -380,6 +382,17 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <div class="modal-foot">
       <button class="btn" onclick="closeModal()">Annuler</button>
       <button class="btn btn-p" onclick="saveModal()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ BATCH LIMIT POPUP ════════════════════════════ -->
+<div class="modal-bg" id="batchLimitBg" onclick="closeBatchLimitPopup()">
+  <div class="modal" onclick="event.stopPropagation()" style="max-width:400px;">
+    <div class="modal-title">Trop de fichiers sélectionnés</div>
+    <div class="modal-sub" id="batchLimitMsg"></div>
+    <div class="modal-foot" style="justify-content:center;">
+      <button id="batchLimitOk" class="btn-primary" style="font-size:125%;padding:10px 28px;" onclick="closeBatchLimitPopup()">Compris</button>
     </div>
   </div>
 </div>
@@ -550,6 +563,11 @@ function getDebtorCodeState(data,debtorType){
   return{code,locked:true,requireType:false,vatRequired:false,showDebtorVatField:false};
 }
 
+const BATCH_LIMIT=5,TOTAL_LIMIT=100;
+function filterBatch(existingCount,newCount){if(newCount>BATCH_LIMIT)return{batchExceeded:true,totalExceeded:false,accepted:0};const available=TOTAL_LIMIT-existingCount;if(newCount>available)return{batchExceeded:false,totalExceeded:true,accepted:Math.max(0,available)};return{batchExceeded:false,totalExceeded:false,accepted:newCount};}
+function showBatchLimitPopup(msg){document.getElementById('batchLimitMsg').textContent=msg;document.getElementById('batchLimitBg').classList.add('show');setTimeout(()=>document.getElementById('batchLimitOk').focus(),50);}
+function closeBatchLimitPopup(){document.getElementById('batchLimitBg').classList.remove('show');}
+
 /* ══ STATE ══════════════════════════════════════════ */
 const S = {
   fields:[
@@ -575,11 +593,17 @@ function onDrop(e){e.preventDefault();document.getElementById('dropzone').classL
 
 function handleFiles(list) {
   const pdfs=Array.from(list).filter(f=>f.type==='application/pdf'||f.name.endsWith('.pdf'));
-  const firstBatch = S.invoices.length===0 && pdfs.length>0;
+  if(!pdfs.length) return;
+  const limit=filterBatch(S.invoices.length,pdfs.length);
+  if(limit.batchExceeded){showBatchLimitPopup(`Vous avez sélectionné ${pdfs.length} fichiers. Vous ne pouvez pas importer plus de ${BATCH_LIMIT} fichiers à la fois.`);return;}
+  if(limit.totalExceeded&&limit.accepted===0){showBatchLimitPopup(`Vous avez atteint la limite de ${TOTAL_LIMIT} factures. Veuillez exporter vos données avant d'en ajouter de nouvelles.`);return;}
+  const accepted=limit.totalExceeded?pdfs.slice(0,limit.accepted):pdfs;
+  if(limit.totalExceeded) showBatchLimitPopup(`Limite de ${TOTAL_LIMIT} factures atteinte : seuls ${limit.accepted} fichier(s) ont été ajoutés.`);
+  const firstBatch = S.invoices.length===0 && accepted.length>0;
   const duplicates=[];
-  pdfs.forEach(f=>{ if(S.files.find(x=>x.name===f.name)){duplicates.push(f.name);}else{S.files.push(f);S.invoices.push({file:f,status:'pending',data:{},errors:{},confidence:null,rawNorm:{},debtorType:'entreprise'});}});
+  accepted.forEach(f=>{ if(S.files.find(x=>x.name===f.name)){duplicates.push(f.name);}else{S.files.push(f);S.invoices.push({file:f,status:'pending',data:{},errors:{},confidence:null,rawNorm:{},debtorType:'entreprise'});}});
   if(duplicates.length) showDupToast(duplicates);
-  if (!pdfs.length) return;
+  if (!accepted.length) return;
   if (firstBatch) {
     document.getElementById('screen-upload').classList.add('out');
     setTimeout(()=>{
