@@ -42,6 +42,8 @@ function parseJSON(raw) {
   catch(e) { try { return {ok:true,data:JSON.parse(m[0].replace(/,\s*([}\]])/g,'$1')),repaired:true}; } catch(e2) { return {ok:false,data:{},err:'JSON invalide'}; } }
 }
 
+function isValidEmail(str){return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(str));}
+
 function vandn(value, f) {
   const errs=[], empty=value==null||String(value).trim()==='';
   if (f.required&&empty) return {valid:false,norm:value,errs:['Champ requis']};
@@ -50,6 +52,10 @@ function vandn(value, f) {
   if (f.type==='date') { norm=normalizeDate(value); if (!norm) errs.push(`Date non reconnue : "${value}"`); else { const d=new Date(norm); if(isNaN(d.getTime())) errs.push('Date invalide'); if(d.getFullYear()<2000||d.getFullYear()>2099) errs.push('Année hors plage'); } }
   if (f.type==='number') { norm=normalizeAmount(value); if (norm==null) errs.push(`Montant non reconnu : "${value}"`); else { if(norm<0) errs.push('Montant négatif'); if(norm>10_000_000) errs.push('Montant > 10M€'); } }
   if (f.type==='text'&&String(value).length>500) errs.push('Valeur trop longue');
+  if (f.type==='email') {
+    norm=String(value).trim().toLowerCase();
+    if (!isValidEmail(norm)) errs.push('Adresse e-mail invalide');
+  }
   return {valid:errs.length===0,norm:norm??value,errs};
 }
 
@@ -64,6 +70,7 @@ const FIELDS = [
   {label:'Échéance',           key:'invoice_due_date',             type:'date',   required:true},
   {label:'Montant total',      key:'invoice_total_amount_inc_vat', type:'number', required:true},
   {label:'Montant en suspens', key:'invoice_open_amount_inc_vat',  type:'number', required:true},
+  {label:'Adresse électronique débiteur', key:'debtor_email',      type:'email',  required:false},
 ];
 
 function checkFields(inv) {
@@ -341,7 +348,7 @@ suite('parseJSON', ()=>{
 });
 
 suite('vandn — champs requis', ()=>{
-  FIELDS.forEach(f=>test(`${f.key} manquant → invalide`, vandn(null,f).valid, false));
+  FIELDS.filter(f=>f.required).forEach(f=>test(`${f.key} manquant → invalide`, vandn(null,f).valid, false));
 });
 
 suite('vandn — champs valides', ()=>{
@@ -1577,6 +1584,31 @@ suite('PDF_NAME_REGEX — groupe nommé invoice_number', ()=>{
   test('capture 455656',                         m3?.groups?.invoice_number,     '455656');
   const m4='20260128_AB_INV_14407.pdf'.match(PDF_NAME_REGEX);
   test('pas de capture si nom invalide',         m4,                             null);
+});
+
+suite('isValidEmail — validation basique', ()=>{
+  test('adresse valide simple',         isValidEmail('user@example.com'),          true);
+  test('adresse valide avec sous-domaine', isValidEmail('user@mail.example.com'),  true);
+  test('adresse valide avec +',         isValidEmail('user+tag@example.com'),      true);
+  test('adresse valide domaine court',  isValidEmail('a@b.fr'),                   true);
+  test('sans @',                        isValidEmail('userexample.com'),           false);
+  test('sans domaine',                  isValidEmail('user@'),                     false);
+  test('sans extension',                isValidEmail('user@example'),              false);
+  test('extension trop courte',         isValidEmail('user@example.c'),            false);
+  test('double @',                      isValidEmail('user@@example.com'),         false);
+  test('vide',                          isValidEmail(''),                          false);
+  test('espaces',                       isValidEmail('user @example.com'),         false);
+});
+
+suite('vandn — champ email', ()=>{
+  const f={key:'debtor_email',type:'email',required:false};
+  const fr={key:'debtor_email',type:'email',required:true};
+  test('vide optionnel → valide',       vandn('',f).valid,                         true);
+  test('vide requis → invalide',        vandn('',fr).valid,                        false);
+  test('email valide → valide',         vandn('User@Example.COM',f).valid,         true);
+  test('email valide → normalisé en minuscules', vandn('User@Example.COM',f).norm, 'user@example.com');
+  test('email invalide → invalide',     vandn('pasunemail',f).valid,               false);
+  test('email invalide → message',      vandn('pasunemail',f).errs[0],             'Adresse e-mail invalide');
 });
 
 console.log(`\n${'─'.repeat(50)}`);
