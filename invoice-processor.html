@@ -188,6 +188,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .country-opt{padding:7px 10px;font-size:13px;cursor:pointer;color:var(--text);}
 .country-opt:hover,.country-opt.active{background:var(--teal-bg);color:var(--teal-text);}
 
+/* PDF NAMES PREVIEW */
+.pdf-names-title{font-size:13px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;}
+.pdf-name-row{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:6px;font-size:12px;font-family:monospace;margin-bottom:4px;background:var(--bg2);border:.5px solid var(--bd);}
+.pdf-name-row.valid{border-color:var(--teal);background:var(--teal-bg);}
+.pdf-name-row.invalid{border-color:var(--red);background:#fff0f0;}
+.pdf-name-badge{font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;flex-shrink:0;}
+.pdf-name-badge.ok{background:var(--teal);color:#fff;}
+.pdf-name-badge.ko{background:var(--red);color:#fff;}
+
 /* EXPORT */
 #screen-export{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;opacity:0;pointer-events:none;transition:opacity .2s;overflow-y:auto;z-index:30;}
 #screen-export.show{opacity:1;pointer-events:all;}
@@ -346,6 +355,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     </div>
     <div class="exp-stats" id="expStats"></div>
     <div class="exp-table-wrap"><table class="exp-table" id="expTable"><thead></thead><tbody></tbody></table></div>
+    <div id="pdfNamesPreview" style="margin-top:2rem;"></div>
     <div class="exp-actions">
       <button class="btn btn-p" onclick="exportZIP()">Télécharger ZIP</button>
       <button class="btn" onclick="confirmRestart()">Nouvelle session</button>
@@ -1094,15 +1104,33 @@ function showExport(){
       +exportFields.map(f=>`<td>${esc(String(inv.data[f.key]??'—'))}</td>`).join('');
     tbody.appendChild(tr);
   });
+  const validated=S.invoices.filter(i=>i.status==='validated');
+  const namesHtml=validated.map(inv=>{
+    const name=buildPdfName(inv.data);
+    const ok=PDF_NAME_REGEX.test(name);
+    return`<div class="pdf-name-row ${ok?'valid':'invalid'}"><span class="pdf-name-badge ${ok?'ok':'ko'}">${ok?'OK':'KO'}</span><span>${esc(name)}</span></div>`;
+  }).join('');
+  document.getElementById('pdfNamesPreview').innerHTML=validated.length
+    ?`<div class="pdf-names-title">Noms PDF après renommage (${validated.length})</div>${namesHtml}`
+    :'';
   document.getElementById('screen-export').classList.add('show');
 }
 function hideExport(){document.getElementById('screen-export').classList.remove('show');}
 
 function snName(s){return s.replace(/[\/\\:*?"<>|]/g,'').replace(/\s+/g,'_').slice(0,80);}
-function getPdfFilename(inv){const num=inv.data['invoice_number'];return(num&&String(num).trim())?snName(String(num))+'.pdf':snName(inv.file.name);}
+function formatAmount(val){const s=String(val).trim();if(s.includes('.')){return s.replace(/\.?0+$/,'').replace('.','');}return s;}
+function normalizeInvRef(val){return String(val).replace(/[^A-Z0-9]/gi,'').toUpperCase();}
+const PDF_NAME_REGEX=/^\d{8}_[A-Z0-9]{4,20}_(?<invoice_number>[A-Z0-9]{1,30})_\d+\.pdf$/;
+function buildPdfName(data){const date=(data.invoice_date||'').replace(/-/g,'');const debCode=String(data.debtor_code||'').toUpperCase();const invRef=normalizeInvRef(data.invoice_number||'');const amount=formatAmount(data.invoice_total_amount_inc_vat||'0');return`${date}_${debCode}_${invRef}_${amount}.pdf`;}
+function getPdfFilename(inv){
+  const name=buildPdfName(inv.data);
+  if(PDF_NAME_REGEX.test(name)) return name;
+  const num=inv.data['invoice_number'];
+  return(num&&String(num).trim())?snName(String(num))+'.pdf':snName(inv.file.name);
+}
 function buildCSV(){
   const validated=S.invoices.filter(i=>i.status==='validated');
-  const header=EXPORT_SCHEMA.map(k=>`"${k}"`).join(',');
+  const header=EXPORT_SCHEMA.map(k=>`"${k}"`).join(';');
   const rows=validated.map(inv=>EXPORT_SCHEMA.map(k=>{
     const v=(k==='administration_code'?inv.data['creditor_vat_number']:inv.data[k])??'';
     return'"'+String(v).replace(/"/g,'""').replace(/\r?\n/g,' ')+'"';

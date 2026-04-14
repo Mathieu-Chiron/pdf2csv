@@ -100,6 +100,11 @@ function isFieldEmpty(inv,key){const raw=inv.data[key];return inv.status!=='pend
 function detectDuplicates(existingNames,newNames){const duplicates=[],added=[];newNames.forEach(name=>{if(existingNames.includes(name)||added.includes(name))duplicates.push(name);else added.push(name);});return{duplicates,added};}
 const BATCH_LIMIT=20,TOTAL_LIMIT=100;
 function filterBatch(existingCount,newCount){if(newCount>BATCH_LIMIT)return{batchExceeded:true,totalExceeded:false,accepted:0};const available=TOTAL_LIMIT-existingCount;if(newCount>available)return{batchExceeded:false,totalExceeded:true,accepted:Math.max(0,available)};return{batchExceeded:false,totalExceeded:false,accepted:newCount};}
+function formatAmount(val){const s=String(val).trim();if(s.includes('.')){return s.replace(/\.?0+$/,'').replace('.','');}return s;}
+function normalizeInvRef(val){return String(val).replace(/[^A-Z0-9]/gi,'').toUpperCase();}
+const PDF_NAME_REGEX=/^\d{8}_[A-Z0-9]{4,20}_(?<invoice_number>[A-Z0-9]{1,30})_\d+\.pdf$/;
+function buildPdfName(data){const date=(data.invoice_date||'').replace(/-/g,'');const debCode=String(data.debtor_code||'').toUpperCase();const invRef=normalizeInvRef(data.invoice_number||'');const amount=formatAmount(data.invoice_total_amount_inc_vat||'0');return`${date}_${debCode}_${invRef}_${amount}.pdf`;}
+function validatePdfName(name){return PDF_NAME_REGEX.test(name);}
 function canShowFinishButton(invoices){if(!invoices.length)return false;return invoices.every(x=>x.status==='validated'||x.status==='skipped');}
 function shouldWarnBeforeExport(invoices){return invoices.some(x=>x.status==='skipped');}
 function getSkippedInvoices(invoices){return invoices.filter(x=>x.status==='skipped').map(x=>x.file.name);}
@@ -1516,6 +1521,62 @@ suite('Upload limits — total (max 100)', ()=>{
   test('Déjà 95 + 10 → totalExceeded (5 acceptés)',  filterBatch(95,10),{batchExceeded:false,totalExceeded:true,accepted:5});
   test('Déjà 100 + 1 → totalExceeded (0 acceptés)',  filterBatch(100,1),{batchExceeded:false,totalExceeded:true,accepted:0});
   test('Déjà 80 + 20 → 20 acceptés (limite exacte)', filterBatch(80,20),{batchExceeded:false,totalExceeded:false,accepted:20});
+});
+
+suite('formatAmount — montant en centimes', ()=>{
+  test('144.07 → 14407',   formatAmount('144.07'),  '14407');
+  test('17.99 → 1799',     formatAmount('17.99'),   '1799');
+  test('2490 → 2490',      formatAmount('2490'),    '2490');
+  test('1210 → 1210',      formatAmount('1210'),    '1210');
+  test('3920.00 → 3920',   formatAmount('3920.00'), '3920');
+  test('3920 → 3920',      formatAmount('3920'),    '3920');
+  test('0.99 → 099',       formatAmount('0.99'),    '099');
+  test('100.00 → 100',     formatAmount('100.00'),  '100');
+  test('100.10 → 1001',    formatAmount('100.10'),  '1001');
+});
+
+suite('normalizeInvRef — nettoyage numéro facture', ()=>{
+  test('455656 → 455656',         normalizeInvRef('455656'),         '455656');
+  test('FR-4545 → FR4545',        normalizeInvRef('FR-4545'),        'FR4545');
+  test('AR-3434-RTR → AR3434RTR', normalizeInvRef('AR-3434-RTR'),    'AR3434RTR');
+  test('MIRRORP-9862 → MIRRORP9862', normalizeInvRef('MIRRORP-9862'),'MIRRORP9862');
+  test('VT2025-0210 → VT20250210',normalizeInvRef('VT2025-0210'),    'VT20250210');
+  test('espaces retirés',         normalizeInvRef('FR 4545'),        'FR4545');
+  test('slashes retirés',         normalizeInvRef('FR/4545'),        'FR4545');
+  test('points retirés',          normalizeInvRef('FR.4545'),        'FR4545');
+  test('minuscules → majuscules', normalizeInvRef('fr4545'),         'FR4545');
+});
+
+suite('buildPdfName — nom complet', ()=>{
+  const d={invoice_date:'2026-01-28',debtor_code:'NL817576320B01',invoice_number:'MIRRORP-9862',invoice_total_amount_inc_vat:'144.07'};
+  test('exemple concret',         buildPdfName(d), '20260128_NL817576320B01_MIRRORP9862_14407.pdf');
+  const d2={invoice_date:'2026-03-15',debtor_code:'MARBOU5RU010',invoice_number:'FR-4545',invoice_total_amount_inc_vat:'3920.00'};
+  test('date + debcode + invref + montant', buildPdfName(d2), '20260315_MARBOU5RU010_FR4545_3920.pdf');
+  const d3={invoice_date:'2025-12-01',debtor_code:'FR123',invoice_number:'455656',invoice_total_amount_inc_vat:'2490'};
+  test('montant entier sans point', buildPdfName(d3), '20251201_FR123_455656_2490.pdf');
+});
+
+suite('validatePdfName — regex de validation', ()=>{
+  test('nom valide exemple concret',   validatePdfName('20260128_NL817576320B01_MIRRORP9862_14407.pdf'), true);
+  test('nom valide simple',            validatePdfName('20260315_FR123_455656_2490.pdf'),                true);
+  test('sans extension → invalide',    validatePdfName('20260128_NL817576320B01_MIRRORP9862_14407'),     false);
+  test('montant avec point → invalide',validatePdfName('20260128_NL817576320B01_MIRRORP9862_144.07.pdf'),false);
+  test('date incomplète → invalide',   validatePdfName('202601_NL817576320B01_MIRRORP9862_14407.pdf'),   false);
+  test('debcode trop court → invalide',validatePdfName('20260128_AB_MIRRORP9862_14407.pdf'),             false);
+  test('debcode trop long → invalide', validatePdfName('20260128_ABCDEFGHIJKLMNOPQRSTU_INV_14407.pdf'),  false);
+  test('minuscules → invalide',        validatePdfName('20260128_nl817576320b01_mirrorp9862_14407.pdf'), false);
+});
+
+suite('PDF_NAME_REGEX — groupe nommé invoice_number', ()=>{
+  const m1='20260128_NL817576320B01_MIRRORP9862_14407.pdf'.match(PDF_NAME_REGEX);
+  test('groupe invoice_number présent',          m1!==null,                      true);
+  test('capture MIRRORP9862',                    m1?.groups?.invoice_number,     'MIRRORP9862');
+  const m2='20260315_MARBOU5RU010_FR4545_3920.pdf'.match(PDF_NAME_REGEX);
+  test('capture FR4545',                         m2?.groups?.invoice_number,     'FR4545');
+  const m3='20251201_FR123_455656_2490.pdf'.match(PDF_NAME_REGEX);
+  test('capture 455656',                         m3?.groups?.invoice_number,     '455656');
+  const m4='20260128_AB_INV_14407.pdf'.match(PDF_NAME_REGEX);
+  test('pas de capture si nom invalide',         m4,                             null);
 });
 
 console.log(`\n${'─'.repeat(50)}`);
