@@ -357,7 +357,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <div class="exp-table-wrap"><table class="exp-table" id="expTable"><thead></thead><tbody></tbody></table></div>
     <div id="pdfNamesPreview" style="margin-top:2rem;"></div>
     <div class="exp-actions">
-      <button class="btn btn-p" onclick="exportZIP()">Télécharger ZIP</button>
+      <button class="btn btn-p" onclick="downloadAll()">Télécharger les éléments</button>
       <button class="btn" onclick="confirmRestart()">Nouvelle session</button>
     </div>
   </div>
@@ -528,6 +528,10 @@ function vandn(value, f, ctx) {
     norm=String(value).trim().toLowerCase();
     if (!isValidEmail(norm)) errs.push('Adresse e-mail invalide');
   }
+  if (f.type==='country_code') {
+    norm=String(value).trim().toUpperCase();
+    if (!isValidCountryCode(norm)) errs.push('Code pays invalide — utilisez le code ISO 2 lettres (ex : FR, DE, BE)');
+  }
   return {valid:errs.length===0,norm:norm??value,errs};
 }
 
@@ -566,33 +570,30 @@ const EXPORT_SCHEMA=[
   'debtor_firstname',               // 11
   'debtor_infix',                   // 12
   'debtor_lastname',                // 13
-  'debtor_sms_number',              // 14
-  'debtor_phone_number',            // 15
-  'debtor_email',                   // 16
-  'debtor_invoice_email',           // 17
-  'debtor_reminder_email',          // 18
-  'invoice_number',                 // 19
-  'invoice_date',                   // 20
-  'invoice_due_date',               // 21
-  'invoice_total_amount_inc_vat',   // 22
-  'invoice_open_amount_inc_vat',    // 23
-  'invoice_flow_code',              // 24
-  'debtor_flow_code',               // 25
-  'invoice_contact_type',           // 26
-  'invoice_contact_name',           // 27
-  'invoice_contact_street',         // 28
-  'invoice_contact_postalcode',     // 29
-  'invoice_contact_city',           // 30
-  'invoice_contact_country',        // 31
-  'invoice_contact_phone',          // 32
-  'invoice_contact_mobile',         // 33
-  'invoice_contact_email',          // 34
-  'invoice_contact_invoice_email',  // 35
-  'invoice_contact_reminder_email', // 36
-  'invoice_contact_gender',         // 37
-  'invoice_contact_is_company',     // 38
+  'debtor_email',                   // 14
+  'debtor_invoice_email',           // 15
+  'debtor_reminder_email',          // 16
+  'invoice_number',                 // 17
+  'invoice_date',                   // 18
+  'invoice_due_date',               // 19
+  'invoice_total_amount_inc_vat',   // 20
+  'invoice_open_amount_inc_vat',    // 21
+  'invoice_flow_code',              // 22
+  'debtor_flow_code',               // 23
+  'invoice_contact_type',           // 24
+  'invoice_contact_name',           // 25
+  'invoice_contact_street',         // 26
+  'invoice_contact_postalcode',     // 27
+  'invoice_contact_city',           // 28
+  'invoice_contact_country',        // 29
+  'invoice_contact_email',          // 30
+  'invoice_contact_invoice_email',  // 31
+  'invoice_contact_reminder_email', // 32
+  'invoice_contact_gender',         // 33
+  'invoice_contact_is_company',     // 34
 ];
 function isValidEmail(str){return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(str));}
+function isValidCountryCode(str){return /^[A-Z]{2}$/.test(String(str));}
 function isValidVAT(str){if(!str||typeof str!=='string')return false;const s=str.replace(/[\s.\-]/g,'').toUpperCase();return Object.values(EU_VAT_PATTERNS).some(p=>p.test(s));}
 function normalizeVAT(raw){if(!raw)return null;const s=String(raw).replace(/[\s.\-]/g,'').toUpperCase();return isValidVAT(s)?s:null;}
 const VAT_HINTS={AT:{example:'ATU12345678',desc:'ATU + 8 chiffres'},BE:{example:'BE0123456789',desc:'BE + 10 chiffres'},BG:{example:'BG123456789',desc:'BG + 9 ou 10 chiffres'},HR:{example:'HR12345678901',desc:'HR + 11 chiffres'},CY:{example:'CY12345678A',desc:'CY + 8 chiffres + 1 lettre'},CZ:{example:'CZ12345678',desc:'CZ + 8 à 10 chiffres'},DK:{example:'DK12345678',desc:'DK + 8 chiffres'},EE:{example:'EE123456789',desc:'EE + 9 chiffres'},FI:{example:'FI12345678',desc:'FI + 8 chiffres'},FR:{example:'FR12345678901',desc:'FR + 2 caractères + 9 chiffres'},DE:{example:'DE123456789',desc:'DE + 9 chiffres'},EL:{example:'EL123456789',desc:'EL + 9 chiffres'},GR:{example:'EL123456789',desc:'EL + 9 chiffres (la Grèce utilise le préfixe EL)'},HU:{example:'HU12345678',desc:'HU + 8 chiffres'},IE:{example:'IE1234567A',desc:'IE + 7 chiffres + 1-2 lettres'},IT:{example:'IT12345678901',desc:'IT + 11 chiffres'},LV:{example:'LV12345678901',desc:'LV + 11 chiffres'},LT:{example:'LT123456789',desc:'LT + 9 ou 12 chiffres'},LU:{example:'LU12345678',desc:'LU + 8 chiffres'},MT:{example:'MT12345678',desc:'MT + 8 chiffres'},NL:{example:'NL123456789B01',desc:'NL + 9 chiffres + B + 2 chiffres'},PL:{example:'PL1234567890',desc:'PL + 10 chiffres'},PT:{example:'PT123456789',desc:'PT + 9 chiffres'},RO:{example:'RO12345678',desc:'RO + 2 à 10 chiffres'},SK:{example:'SK1234567890',desc:'SK + 10 chiffres'},SI:{example:'SI12345678',desc:'SI + 8 chiffres'},ES:{example:'ESA1234567B',desc:'ES + 1 caractère + 7 chiffres + 1 caractère'},SE:{example:'SE123456789012',desc:'SE + 12 chiffres'},GB:{example:'GB123456789',desc:'GB + 9 chiffres'},CHE:{example:'CHE123456789',desc:'CHE + 9 chiffres'},CH:{example:'CHE123456789',desc:'CHE + 9 chiffres (préfixe CHE, pas CH)'}};
@@ -626,7 +627,7 @@ function closeBatchLimitPopup(){document.getElementById('batchLimitBg').classLis
 /* ══ STATE ══════════════════════════════════════════ */
 const S = {
   fields:[
-    {label:'Nom / Prénom',       key:'debtor_lastname',              type:'text',   required:true},
+    {label:'NOM/PRENOM - ENTREPRISE', key:'debtor_lastname',          type:'text',   required:true},
     {label:'Adresse',            key:'debtor_post_street_1',         type:'text',   required:true},
     {label:'Code postal',        key:'debtor_post_postalcode',       type:'postal_code',   required:true},
     {label:'Ville',              key:'debtor_post_city',             type:'text',   required:true},
@@ -769,15 +770,15 @@ function renderFieldsUI(inv) {
     const err=inv.errors?.[f.key],wasNorm=inv.rawNorm?.[f.key]===true;
     const isEmpty=inv.status!=='pending'&&(raw==null||String(raw).trim()==='');
     const isCountry=f.key==='debtor_post_country_code';
-    const displayVal=isCountry&&val===''&&inv.status!=='pending'?'France':val;
-    if(isCountry&&displayVal==='France'&&!inv.data[f.key]) inv.data[f.key]='France';
+    const displayVal=isCountry&&val===''&&inv.status!=='pending'?'FR':val;
+    if(isCountry&&displayVal==='FR'&&!inv.data[f.key]) inv.data[f.key]='FR';
     const row=document.createElement('div');row.className='field-row';
     const inputClass=`field-input${err?' empty':isEmpty?' empty':wasNorm?' normd':''}`;
     row.innerHTML=`
       <div class="field-lbl">${esc(f.label)}${f.required?'<span class="req">*</span>':''}</div>
       ${isCountry?`<div class="country-wrap">
         <input class="${inputClass}" type="text" id="fi_${f.key}" value="${esc(displayVal)}"
-          placeholder="France" autocomplete="off"
+          placeholder="FR" autocomplete="off"
           oninput="onCountryInput(this);onFI('${f.key}',this.value)"
           onfocus="onCountryInput(this)"
           onblur="setTimeout(closeCountryDrop,150)"
@@ -1000,7 +1001,7 @@ JSON uniquement.`;
         norm[f.key]=nv; rawNorm[f.key]=String(nv)!==String(v);
       } else { norm[f.key]=null; rawNorm[f.key]=false; }
     });
-    if(!norm['debtor_post_country_code']) norm['debtor_post_country_code']='France';
+    if(!norm['debtor_post_country_code']) norm['debtor_post_country_code']='FR';
     VAT_FIELDS.forEach(f=>{const raw=parsed.data[f.key];norm[f.key]=(raw&&raw!=='null')?normalizeVAT(raw):null;});
     norm.debtor_code=computeDebtorCode(norm);
     inv.data=norm;inv.rawNorm=rawNorm;inv.repaired=parsed.repaired||false;
@@ -1017,6 +1018,8 @@ function checkFields(inv){
     if(!res.valid){inv.errors[f.key]=res.errs[0];ok=false;}
     else if(res.norm!==v&&res.norm!=null) inv.data[f.key]=res.norm;
   });
+  // Normalize invoice_number to "YYYY-NNNNN"
+  if(inv.data.invoice_number) inv.data.invoice_number=`${fmtDate(inv.data.invoice_date)}-${fmtInvref(inv.data.invoice_number)}`;
   // Creditor VAT always required
   const rawC=inv.data.creditor_vat_number;
   const nc=normalizeVAT(rawC);
@@ -1112,8 +1115,8 @@ function showExport(){
   });
   const validated=S.invoices.filter(i=>i.status==='validated');
   const namesHtml=validated.map(inv=>{
-    const name=buildPdfName(inv.data);
-    const ok=PDF_NAME_REGEX.test(name);
+    const name=mkFname(inv.data);
+    const ok=FNAME_REGEX.test(name);
     return`<div class="pdf-name-row ${ok?'valid':'invalid'}"><span class="pdf-name-badge ${ok?'ok':'ko'}">${ok?'OK':'KO'}</span><span>${esc(name)}</span></div>`;
   }).join('');
   document.getElementById('pdfNamesPreview').innerHTML=validated.length
@@ -1124,21 +1127,31 @@ function showExport(){
 function hideExport(){document.getElementById('screen-export').classList.remove('show');}
 
 function snName(s){return s.replace(/[\/\\:*?"<>|]/g,'').replace(/\s+/g,'_').slice(0,80);}
-function formatAmount(val){const s=String(val).trim();if(s.includes('.')){return s.replace(/\.?0+$/,'').replace('.','');}return s;}
-function normalizeInvRef(val){return String(val).replace(/[^A-Z0-9]/gi,'').toUpperCase();}
-const PDF_NAME_REGEX=/^\d{8}_[A-Z0-9]{4,20}_(?<invoice_number>[A-Z0-9]{1,30})_\d+\.pdf$/;
-function buildPdfName(data){const date=(data.invoice_date||'').replace(/-/g,'');const debCode=String(data.debtor_code||'').toUpperCase();const invRef=normalizeInvRef(data.invoice_number||'');const amount=formatAmount(data.invoice_total_amount_inc_vat||'0');return`${date}_${debCode}_${invRef}_${amount}.pdf`;}
+function fmtDate(date){return String(date||'').slice(0,4);}
+function fmtInvref(val){const digits=String(val||'').replace(/\D/g,'');return digits.slice(-5).padStart(5,'0');}
+function fmtDebcode(data){const name=computeDebtorCompanyName(data)||data.debtor_lastname||'';return String(name).replace(/[\/\\:*?"<>|]/g,' ').replace(/\s+/g,' ').trim().slice(0,60);}
+function fmtAmount(val){const s=String(val).trim();if(s.includes('.')){return s.replace(/\.?0+$/,'').replace('.','');}return s;}
+const FNAME_REGEX=/^(?<year>20\d{2})-(?<invoice_number>\d{5})\.pdf$/;
+function mkFname(data){return`${data.invoice_number}.pdf`;}
 function getPdfFilename(inv){
-  const name=buildPdfName(inv.data);
-  if(PDF_NAME_REGEX.test(name)) return name;
+  const name=mkFname(inv.data);
+  if(FNAME_REGEX.test(name)) return name;
   const num=inv.data['invoice_number'];
   return(num&&String(num).trim())?snName(String(num))+'.pdf':snName(inv.file.name);
+}
+function computeDebtorCompanyName(data){
+  const parts=[data.debtor_firstname,data.debtor_infix,data.debtor_lastname].filter(v=>v&&String(v).trim());
+  return parts.join(' ');
 }
 function buildCSV(){
   const validated=S.invoices.filter(i=>i.status==='validated');
   const header=EXPORT_SCHEMA.map(k=>`"${k}"`).join(';');
   const rows=validated.map(inv=>EXPORT_SCHEMA.map(k=>{
-    const v=(k==='administration_code'?inv.data['creditor_vat_number']:inv.data[k])??'';
+    let v;
+    if(k==='administration_code') v=inv.data['creditor_vat_number'];
+    else if(k==='debtor_company_name') v=computeDebtorCompanyName(inv.data);
+    else v=inv.data[k];
+    v=v??'';
     return'"'+String(v).replace(/"/g,'""').replace(/\r?\n/g,' ')+'"';
   }).join(';'));
   return [header,...rows].join('\n');
@@ -1146,9 +1159,12 @@ function buildCSV(){
 function exportCSV(){dlBlob(new Blob(['\uFEFF'+buildCSV()],{type:'text/csv;charset=utf-8;'}),'factures.csv');}
 async function exportZIP(){
   const z=new JSZip();
-  z.file('factures.csv','\uFEFF'+buildCSV());
   for(const inv of S.invoices.filter(i=>i.status==='validated')) z.file(getPdfFilename(inv),await inv.file.arrayBuffer());
-  dlBlob(await z.generateAsync({type:'blob'}),'factures_export.zip');
+  dlBlob(await z.generateAsync({type:'blob'}),'factures_pdf.zip');
+}
+async function downloadAll(){
+  exportCSV();
+  await exportZIP();
   S.zipDownloaded=true;
 }
 function dlBlob(b,n){const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=n;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
@@ -1258,7 +1274,8 @@ function doRemove(){
 }
 
 /* ══ COUNTRY AUTOCOMPLETE ════════════════════════════ */
-const COUNTRIES=['France','Afghanistan','Afrique du Sud','Albanie','Algérie','Allemagne','Andorre','Angola','Antigua-et-Barbuda','Arabie saoudite','Argentine','Arménie','Australie','Autriche','Azerbaïdjan','Bahamas','Bahreïn','Bangladesh','Barbade','Bélarus','Belgique','Belize','Bénin','Bhoutan','Bolivie','Bosnie-Herzégovine','Botswana','Brésil','Brunéi','Bulgarie','Burkina Faso','Burundi','Cabo Verde','Cambodge','Cameroun','Canada','Centrafrique','Chili','Chine','Chypre','Colombie','Comores','Congo','Corée du Nord','Corée du Sud','Costa Rica',"Côte d'Ivoire",'Croatie','Cuba','Danemark','Djibouti','Dominique','Égypte','Émirats arabes unis','Équateur','Érythrée','Espagne','Estonie','Eswatini','États-Unis','Éthiopie','Fidji','Finlande','Gabon','Gambie','Géorgie','Ghana','Grèce','Grenade','Guatemala','Guinée','Guinée-Bissau','Guinée équatoriale','Guyana','Haïti','Honduras','Hongrie','Inde','Indonésie','Irak','Iran','Irlande','Islande','Israël','Italie','Jamaïque','Japon','Jordanie','Kazakhstan','Kenya','Kirghizistan','Kiribati','Koweït','Laos','Lesotho','Lettonie','Liban','Libéria','Libye','Liechtenstein','Lituanie','Luxembourg','Madagascar','Malaisie','Malawi','Maldives','Mali','Malte','Maroc','Marshall','Maurice','Mauritanie','Mexique','Micronésie','Moldavie','Monaco','Mongolie','Monténégro','Mozambique','Myanmar','Namibie','Nauru','Népal','Nicaragua','Niger','Nigéria','Norvège','Nouvelle-Zélande','Oman','Ouganda','Pakistan','Palaos','Palestine','Panama','Papouasie-Nouvelle-Guinée','Paraguay','Pays-Bas','Pérou','Philippines','Pologne','Portugal','Qatar','République démocratique du Congo','République dominicaine','République tchèque','Roumanie','Royaume-Uni','Russie','Rwanda','Saint-Christophe-et-Niévès','Saint-Marin','Saint-Vincent-et-les-Grenadines','Sainte-Lucie','Salvador','Samoa','São Tomé-et-Príncipe','Sénégal','Serbie','Seychelles','Sierra Leone','Singapour','Slovaquie','Slovénie','Somalie','Soudan','Soudan du Sud','Sri Lanka','Suède','Suisse','Suriname','Syrie','Tadjikistan','Tanzanie','Tchad','Thaïlande','Timor oriental','Togo','Tonga','Trinité-et-Tobago','Tunisie','Turkménistan','Turquie','Tuvalu','Ukraine','Uruguay','Uzbekistan','Vanuatu','Vatican','Venezuela','Vietnam','Yémen','Zambie','Zimbabwe'];
+const COUNTRY_CODES={'France':'FR','Afghanistan':'AF','Afrique du Sud':'ZA','Albanie':'AL','Algérie':'DZ','Allemagne':'DE','Andorre':'AD','Angola':'AO','Antigua-et-Barbuda':'AG','Arabie saoudite':'SA','Argentine':'AR','Arménie':'AM','Australie':'AU','Autriche':'AT','Azerbaïdjan':'AZ','Bahamas':'BS','Bahreïn':'BH','Bangladesh':'BD','Barbade':'BB','Bélarus':'BY','Belgique':'BE','Belize':'BZ','Bénin':'BJ','Bhoutan':'BT','Bolivie':'BO','Bosnie-Herzégovine':'BA','Botswana':'BW','Brésil':'BR','Brunéi':'BN','Bulgarie':'BG','Burkina Faso':'BF','Burundi':'BI','Cabo Verde':'CV','Cambodge':'KH','Cameroun':'CM','Canada':'CA','Centrafrique':'CF','Chili':'CL','Chine':'CN','Chypre':'CY','Colombie':'CO','Comores':'KM','Congo':'CG','Corée du Nord':'KP','Corée du Sud':'KR','Costa Rica':'CR',"Côte d'Ivoire":'CI','Croatie':'HR','Cuba':'CU','Danemark':'DK','Djibouti':'DJ','Dominique':'DM','Égypte':'EG','Émirats arabes unis':'AE','Équateur':'EC','Érythrée':'ER','Espagne':'ES','Estonie':'EE','Eswatini':'SZ','États-Unis':'US','Éthiopie':'ET','Fidji':'FJ','Finlande':'FI','Gabon':'GA','Gambie':'GM','Géorgie':'GE','Ghana':'GH','Grèce':'GR','Grenade':'GD','Guatemala':'GT','Guinée':'GN','Guinée-Bissau':'GW','Guinée équatoriale':'GQ','Guyana':'GY','Haïti':'HT','Honduras':'HN','Hongrie':'HU','Inde':'IN','Indonésie':'ID','Irak':'IQ','Iran':'IR','Irlande':'IE','Islande':'IS','Israël':'IL','Italie':'IT','Jamaïque':'JM','Japon':'JP','Jordanie':'JO','Kazakhstan':'KZ','Kenya':'KE','Kirghizistan':'KG','Kiribati':'KI','Koweït':'KW','Laos':'LA','Lesotho':'LS','Lettonie':'LV','Liban':'LB','Libéria':'LR','Libye':'LY','Liechtenstein':'LI','Lituanie':'LT','Luxembourg':'LU','Madagascar':'MG','Malaisie':'MY','Malawi':'MW','Maldives':'MV','Mali':'ML','Malte':'MT','Maroc':'MA','Marshall':'MH','Maurice':'MU','Mauritanie':'MR','Mexique':'MX','Micronésie':'FM','Moldavie':'MD','Monaco':'MC','Mongolie':'MN','Monténégro':'ME','Mozambique':'MZ','Myanmar':'MM','Namibie':'NA','Nauru':'NR','Népal':'NP','Nicaragua':'NI','Niger':'NE','Nigéria':'NG','Norvège':'NO','Nouvelle-Zélande':'NZ','Oman':'OM','Ouganda':'UG','Pakistan':'PK','Palaos':'PW','Palestine':'PS','Panama':'PA','Papouasie-Nouvelle-Guinée':'PG','Paraguay':'PY','Pays-Bas':'NL','Pérou':'PE','Philippines':'PH','Pologne':'PL','Portugal':'PT','Qatar':'QA','République démocratique du Congo':'CD','République dominicaine':'DO','République tchèque':'CZ','Roumanie':'RO','Royaume-Uni':'GB','Russie':'RU','Rwanda':'RW','Saint-Christophe-et-Niévès':'KN','Saint-Marin':'SM','Saint-Vincent-et-les-Grenadines':'VC','Sainte-Lucie':'LC','Salvador':'SV','Samoa':'WS','São Tomé-et-Príncipe':'ST','Sénégal':'SN','Serbie':'RS','Seychelles':'SC','Sierra Leone':'SL','Singapour':'SG','Slovaquie':'SK','Slovénie':'SI','Somalie':'SO','Soudan':'SD','Soudan du Sud':'SS','Sri Lanka':'LK','Suède':'SE','Suisse':'CH','Suriname':'SR','Syrie':'SY','Tadjikistan':'TJ','Tanzanie':'TZ','Tchad':'TD','Thaïlande':'TH','Timor oriental':'TL','Togo':'TG','Tonga':'TO','Trinité-et-Tobago':'TT','Tunisie':'TN','Turkménistan':'TM','Turquie':'TR','Tuvalu':'TV','Ukraine':'UA','Uruguay':'UY','Uzbekistan':'UZ','Vanuatu':'VU','Vatican':'VA','Venezuela':'VE','Vietnam':'VN','Yémen':'YE','Zambie':'ZM','Zimbabwe':'ZW'};
+const COUNTRIES=Object.keys(COUNTRY_CODES);
 
 function deaccent(s){return s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();}
 
@@ -1274,8 +1291,9 @@ function onCountryInput(input){
 
 function pickCountry(val,e){
   e.preventDefault();
+  const iso=COUNTRY_CODES[val]||val;
   const input=document.getElementById('fi_debtor_post_country_code');
-  if(input){input.value=val;onFI('debtor_post_country_code',val);}
+  if(input){input.value=iso;onFI('debtor_post_country_code',iso);}
   closeCountryDrop();
 }
 

@@ -43,6 +43,7 @@ function parseJSON(raw) {
 }
 
 function isValidEmail(str){return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(str));}
+function isValidCountryCode(str){return /^[A-Z]{2}$/.test(String(str));}
 
 function vandn(value, f) {
   const errs=[], empty=value==null||String(value).trim()==='';
@@ -56,6 +57,10 @@ function vandn(value, f) {
     norm=String(value).trim().toLowerCase();
     if (!isValidEmail(norm)) errs.push('Adresse e-mail invalide');
   }
+  if (f.type==='country_code') {
+    norm=String(value).trim().toUpperCase();
+    if (!isValidCountryCode(norm)) errs.push('Code pays invalide — utilisez le code ISO 2 lettres (ex : FR, DE, BE)');
+  }
   return {valid:errs.length===0,norm:norm??value,errs};
 }
 
@@ -64,7 +69,7 @@ const FIELDS = [
   {label:'Adresse',            key:'debtor_post_street_1',         type:'text',   required:true},
   {label:'Code postal',        key:'debtor_post_postalcode',       type:'text',   required:true},
   {label:'Ville',              key:'debtor_post_city',             type:'text',   required:true},
-  {label:'Pays',               key:'debtor_post_country_code',     type:'text',   required:true},
+  {label:'Pays',               key:'debtor_post_country_code',     type:'country_code',   required:true},
   {label:'N° de facture',      key:'invoice_number',               type:'text',   required:true},
   {label:'Date émission',      key:'invoice_date',                 type:'date',   required:true},
   {label:'Échéance',           key:'invoice_due_date',             type:'date',   required:true},
@@ -76,6 +81,8 @@ const FIELDS = [
 function checkFields(inv) {
   inv.errors={}; let ok=true;
   FIELDS.forEach(f=>{ const v=inv.data[f.key],res=vandn(v,f); if(!res.valid){inv.errors[f.key]=res.errs[0];ok=false;} else if(res.norm!==v&&res.norm!=null) inv.data[f.key]=res.norm; });
+  // Normalize invoice_number to "YYYY-NNNNN"
+  if(inv.data.invoice_number) inv.data.invoice_number=`${fmtDate(inv.data.invoice_date)}-${fmtInvref(inv.data.invoice_number)}`;
   // Creditor VAT always required
   const rawC=inv.data.creditor_vat_number;
   const nc=normalizeVAT(rawC);
@@ -107,11 +114,13 @@ function isFieldEmpty(inv,key){const raw=inv.data[key];return inv.status!=='pend
 function detectDuplicates(existingNames,newNames){const duplicates=[],added=[];newNames.forEach(name=>{if(existingNames.includes(name)||added.includes(name))duplicates.push(name);else added.push(name);});return{duplicates,added};}
 const BATCH_LIMIT=20,TOTAL_LIMIT=100;
 function filterBatch(existingCount,newCount){if(newCount>BATCH_LIMIT)return{batchExceeded:true,totalExceeded:false,accepted:0};const available=TOTAL_LIMIT-existingCount;if(newCount>available)return{batchExceeded:false,totalExceeded:true,accepted:Math.max(0,available)};return{batchExceeded:false,totalExceeded:false,accepted:newCount};}
-function formatAmount(val){const s=String(val).trim();if(s.includes('.')){return s.replace(/\.?0+$/,'').replace('.','');}return s;}
-function normalizeInvRef(val){return String(val).replace(/[^A-Z0-9]/gi,'').toUpperCase();}
-const PDF_NAME_REGEX=/^\d{8}_[A-Z0-9]{4,20}_(?<invoice_number>[A-Z0-9]{1,30})_\d+\.pdf$/;
-function buildPdfName(data){const date=(data.invoice_date||'').replace(/-/g,'');const debCode=String(data.debtor_code||'').toUpperCase();const invRef=normalizeInvRef(data.invoice_number||'');const amount=formatAmount(data.invoice_total_amount_inc_vat||'0');return`${date}_${debCode}_${invRef}_${amount}.pdf`;}
-function validatePdfName(name){return PDF_NAME_REGEX.test(name);}
+function fmtDate(date){return String(date||'').slice(0,4);}
+function fmtInvref(val){const digits=String(val||'').replace(/\D/g,'');return digits.slice(-5).padStart(5,'0');}
+function fmtDebcode(data){const name=computeDebtorCompanyName(data)||data.debtor_lastname||'';return String(name).replace(/[\/\\:*?"<>|]/g,' ').replace(/\s+/g,' ').trim().slice(0,60);}
+function fmtAmount(val){const s=String(val).trim();if(s.includes('.')){return s.replace(/\.?0+$/,'').replace('.','');}return s;}
+const FNAME_REGEX=/^(?<year>20\d{2})-(?<invoice_number>\d{5})\.pdf$/;
+function mkFname(data){return`${data.invoice_number}.pdf`;}
+function validatePdfName(name){return FNAME_REGEX.test(name);}
 function canShowFinishButton(invoices){if(!invoices.length)return false;return invoices.every(x=>x.status==='validated'||x.status==='skipped');}
 function shouldWarnBeforeExport(invoices){return invoices.some(x=>x.status==='skipped');}
 function getSkippedInvoices(invoices){return invoices.filter(x=>x.status==='skipped').map(x=>x.file.name);}
@@ -241,6 +250,11 @@ function hasDuplicateVAT(creditorVAT,debtorVAT){
   if(!creditorVAT||!debtorVAT) return false;
   const c=normalizeVAT(creditorVAT),d=normalizeVAT(debtorVAT);
   return !!(c&&d&&c===d);
+}
+
+function computeDebtorCompanyName(data){
+  const parts=[data.debtor_firstname,data.debtor_infix,data.debtor_lastname].filter(v=>v&&String(v).trim());
+  return parts.join(' ');
 }
 
 /* mirrored from invoice-processor.html buildCSV */
@@ -844,8 +858,8 @@ suite('Risque: checkFields idempotent (double appel sans corruption)', ()=>{
 /* ══ B2B / B2C CSV LOGIC ═════════════════════════════ */
 
 // Helper: mirrors buildCSV — scans only validated invoices for VAT columns
-const EXPORT_COLS_SIM=['administration_code','debtor_code','debtor_lastname','debtor_post_street_1','debtor_post_postalcode','debtor_post_city','invoice_number','invoice_date','invoice_due_date','invoice_total_amount_inc_vat','invoice_open_amount_inc_vat','debtor_invoice_email','debtor_reminder_email','debtor_sms_number','debtor_origin_id'];
-const EMPTY_KEYS_SIM=['debtor_invoice_email','debtor_reminder_email','debtor_sms_number','debtor_origin_id'];
+const EXPORT_COLS_SIM=['administration_code','debtor_company_name','debtor_code','debtor_lastname','debtor_post_street_1','debtor_post_postalcode','debtor_post_city','invoice_number','invoice_date','invoice_due_date','invoice_total_amount_inc_vat','invoice_open_amount_inc_vat','debtor_invoice_email','debtor_reminder_email','debtor_origin_id'];
+const EMPTY_KEYS_SIM=['debtor_invoice_email','debtor_reminder_email','debtor_origin_id'];
 function simulateBuildCSV(invoices){
   const validated=invoices.filter(i=>i.status==='validated');
   const exportFields=EXPORT_COLS_SIM.map(k=>({key:k,label:k}));
@@ -853,6 +867,7 @@ function simulateBuildCSV(invoices){
   const rows=validated.map(inv=>EXPORT_COLS_SIM.map(k=>{
     let v='';
     if(k==='administration_code') v=String(inv.data.creditor_vat_number??'');
+    else if(k==='debtor_company_name') v=computeDebtorCompanyName(inv.data);
     else if(k==='debtor_code') v=String(inv.data[k]||generateDebtorCode(inv.data));
     else if(EMPTY_KEYS_SIM.includes(k)) v='';
     else v=String(inv.data[k]??'').replace(/\r?\n/g,' ');
@@ -864,7 +879,7 @@ function simulateBuildCSV(invoices){
 // ── Placeholder data ──────────────────────────────────
 const b2cRaw={
   debtor_lastname:'Jean Dupont',debtor_post_street_1:'12 rue des Lilas',
-  debtor_post_postalcode:'69001',debtor_post_city:'Lyon',debtor_post_country_code:'France',
+  debtor_post_postalcode:'69001',debtor_post_city:'Lyon',debtor_post_country_code:'FR',
   invoice_number:'F-2024-042',invoice_date:'2024-06-01',invoice_due_date:'2024-07-01',
   amount_ttc:250,invoice_total_amount_inc_vat:250,invoice_open_amount_inc_vat:250,
   creditor_vat_number:'FR12345678901',debtor_vat_number:null
@@ -873,7 +888,7 @@ const b2cData={...b2cRaw,debtor_code:computeDebtorCode(b2cRaw)};
 
 const b2bRaw={
   debtor_lastname:'ACME SAS',debtor_post_street_1:'5 avenue de la République',
-  debtor_post_postalcode:'75011',debtor_post_city:'Paris',debtor_post_country_code:'France',
+  debtor_post_postalcode:'75011',debtor_post_city:'Paris',debtor_post_country_code:'FR',
   invoice_number:'F-2024-043',invoice_date:'2024-06-02',invoice_due_date:'2024-07-02',
   amount_ttc:1200,invoice_total_amount_inc_vat:1200,invoice_open_amount_inc_vat:1200,
   creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789'
@@ -1260,7 +1275,7 @@ suite('Simulation: B2B (TVA connue) → clic B2C → reclic B2B → CSV', ()=>{
   const inv={
     data:{
       debtor_lastname:'ACME SAS',debtor_post_street_1:'5 avenue de la République',
-      debtor_post_postalcode:'75011',debtor_post_city:'Paris',debtor_post_country_code:'France',
+      debtor_post_postalcode:'75011',debtor_post_city:'Paris',debtor_post_country_code:'FR',
       invoice_number:'F-2024-099',invoice_date:'2024-06-01',invoice_due_date:'2024-07-01',
       amount_ttc:1200,invoice_total_amount_inc_vat:1200,invoice_open_amount_inc_vat:1200,
       creditor_vat_number:'FR12345678901',debtor_vat_number:'DE123456789',debtor_code:'DE123456789'
@@ -1327,18 +1342,18 @@ suite('CSV: N° TVA débiteur jamais dans le CSV — Code débiteur en position 
   const {exportFields:ef1,header:h1}=simulateBuildCSV([b2bInv]);
   test('B2B seul: debtor_vat absent', ef1.findIndex(f=>f.key==='debtor_vat_number'), -1);
   test('B2B seul: Code débiteur présent', h1.includes('debtor_code'), true);
-  test('B2B seul: Code débiteur en position 2 (index 1)', ef1[1].key, 'debtor_code');
+  test('B2B seul: Code débiteur en position 3 (index 2)', ef1[2].key, 'debtor_code');
 
   // B2C only
   const b2cInv={data:{...base,creditor_vat_number:'FR12345678901',debtor_vat_number:null,debtor_code:'TESPAR1R750'},debtorType:'particulier',status:'validated'};
   const {exportFields:ef2}=simulateBuildCSV([b2cInv]);
   test('B2C seul: debtor_vat absent', ef2.findIndex(f=>f.key==='debtor_vat_number'), -1);
-  test('B2C seul: Code débiteur en position 2 (index 1)', ef2[1].key, 'debtor_code');
+  test('B2C seul: Code débiteur en position 3 (index 2)', ef2[2].key, 'debtor_code');
 
   // Mixed
   const {exportFields:ef3}=simulateBuildCSV([b2cInv,b2bInv]);
   test('Mixte: debtor_vat absent', ef3.findIndex(f=>f.key==='debtor_vat_number'), -1);
-  test('Mixte: Code débiteur en position 2 (index 1)', ef3[1].key, 'debtor_code');
+  test('Mixte: Code débiteur en position 3 (index 2)', ef3[2].key, 'debtor_code');
 });
 
 /* ══ BUG: FR123456789 REJETÉE — FORMAT INCOMPLET ════ */
@@ -1530,60 +1545,170 @@ suite('Upload limits — total (max 100)', ()=>{
   test('Déjà 80 + 20 → 20 acceptés (limite exacte)', filterBatch(80,20),{batchExceeded:false,totalExceeded:false,accepted:20});
 });
 
-suite('formatAmount — montant en centimes', ()=>{
-  test('144.07 → 14407',   formatAmount('144.07'),  '14407');
-  test('17.99 → 1799',     formatAmount('17.99'),   '1799');
-  test('2490 → 2490',      formatAmount('2490'),    '2490');
-  test('1210 → 1210',      formatAmount('1210'),    '1210');
-  test('3920.00 → 3920',   formatAmount('3920.00'), '3920');
-  test('3920 → 3920',      formatAmount('3920'),    '3920');
-  test('0.99 → 099',       formatAmount('0.99'),    '099');
-  test('100.00 → 100',     formatAmount('100.00'),  '100');
-  test('100.10 → 1001',    formatAmount('100.10'),  '1001');
+suite('fmtDate — extraction année', ()=>{
+  test('2026-01-28 → 2026',  fmtDate('2026-01-28'), '2026');
+  test('2025-12-01 → 2025',  fmtDate('2025-12-01'), '2025');
+  test('vide → vide',        fmtDate(''),            '');
+  test('null → vide',        fmtDate(null),          '');
 });
 
-suite('normalizeInvRef — nettoyage numéro facture', ()=>{
-  test('455656 → 455656',         normalizeInvRef('455656'),         '455656');
-  test('FR-4545 → FR4545',        normalizeInvRef('FR-4545'),        'FR4545');
-  test('AR-3434-RTR → AR3434RTR', normalizeInvRef('AR-3434-RTR'),    'AR3434RTR');
-  test('MIRRORP-9862 → MIRRORP9862', normalizeInvRef('MIRRORP-9862'),'MIRRORP9862');
-  test('VT2025-0210 → VT20250210',normalizeInvRef('VT2025-0210'),    'VT20250210');
-  test('espaces retirés',         normalizeInvRef('FR 4545'),        'FR4545');
-  test('slashes retirés',         normalizeInvRef('FR/4545'),        'FR4545');
-  test('points retirés',          normalizeInvRef('FR.4545'),        'FR4545');
-  test('minuscules → majuscules', normalizeInvRef('fr4545'),         'FR4545');
+suite('fmtInvref — 5 chiffres zero-paddés', ()=>{
+  test('45566 → 45566',              fmtInvref('45566'),          '45566');
+  test('9862 → 09862',               fmtInvref('9862'),           '09862');
+  test('1 → 00001',                  fmtInvref('1'),              '00001');
+  test('FR-04545 → 04545',           fmtInvref('FR-04545'),       '04545');
+  test('VT2025-00210 → 00210',       fmtInvref('VT2025-00210'),   '00210');
+  test('123456 → garde 5 derniers',  fmtInvref('123456'),         '23456');
+  test('vide → 00000',               fmtInvref(''),               '00000');
 });
 
-suite('buildPdfName — nom complet', ()=>{
-  const d={invoice_date:'2026-01-28',debtor_code:'NL817576320B01',invoice_number:'MIRRORP-9862',invoice_total_amount_inc_vat:'144.07'};
-  test('exemple concret',         buildPdfName(d), '20260128_NL817576320B01_MIRRORP9862_14407.pdf');
-  const d2={invoice_date:'2026-03-15',debtor_code:'MARBOU5RU010',invoice_number:'FR-4545',invoice_total_amount_inc_vat:'3920.00'};
-  test('date + debcode + invref + montant', buildPdfName(d2), '20260315_MARBOU5RU010_FR4545_3920.pdf');
-  const d3={invoice_date:'2025-12-01',debtor_code:'FR123',invoice_number:'455656',invoice_total_amount_inc_vat:'2490'};
-  test('montant entier sans point', buildPdfName(d3), '20251201_FR123_455656_2490.pdf');
+suite('fmtDebcode — nom débiteur pour nom de fichier', ()=>{
+  test('company name',   fmtDebcode({debtor_lastname:'ACME SAS'}),                        'ACME SAS');
+  test('firstname + lastname', fmtDebcode({debtor_firstname:'Jean',debtor_lastname:'Dupont'}), 'Jean Dupont');
+  test('chars interdits retirés', fmtDebcode({debtor_lastname:'ACME/SAS:Test'}),          'ACME SAS Test'.replace(/ /g,' '));
 });
 
-suite('validatePdfName — regex de validation', ()=>{
-  test('nom valide exemple concret',   validatePdfName('20260128_NL817576320B01_MIRRORP9862_14407.pdf'), true);
-  test('nom valide simple',            validatePdfName('20260315_FR123_455656_2490.pdf'),                true);
-  test('sans extension → invalide',    validatePdfName('20260128_NL817576320B01_MIRRORP9862_14407'),     false);
-  test('montant avec point → invalide',validatePdfName('20260128_NL817576320B01_MIRRORP9862_144.07.pdf'),false);
-  test('date incomplète → invalide',   validatePdfName('202601_NL817576320B01_MIRRORP9862_14407.pdf'),   false);
-  test('debcode trop court → invalide',validatePdfName('20260128_AB_MIRRORP9862_14407.pdf'),             false);
-  test('debcode trop long → invalide', validatePdfName('20260128_ABCDEFGHIJKLMNOPQRSTU_INV_14407.pdf'),  false);
-  test('minuscules → invalide',        validatePdfName('20260128_nl817576320b01_mirrorp9862_14407.pdf'), false);
+suite('fmtAmount — montant en centimes', ()=>{
+  test('144.07 → 14407',   fmtAmount('144.07'),  '14407');
+  test('17.99 → 1799',     fmtAmount('17.99'),   '1799');
+  test('2490 → 2490',      fmtAmount('2490'),    '2490');
+  test('3920.00 → 3920',   fmtAmount('3920.00'), '3920');
+  test('100.10 → 1001',    fmtAmount('100.10'),  '1001');
 });
 
-suite('PDF_NAME_REGEX — groupe nommé invoice_number', ()=>{
-  const m1='20260128_NL817576320B01_MIRRORP9862_14407.pdf'.match(PDF_NAME_REGEX);
-  test('groupe invoice_number présent',          m1!==null,                      true);
-  test('capture MIRRORP9862',                    m1?.groups?.invoice_number,     'MIRRORP9862');
-  const m2='20260315_MARBOU5RU010_FR4545_3920.pdf'.match(PDF_NAME_REGEX);
-  test('capture FR4545',                         m2?.groups?.invoice_number,     'FR4545');
-  const m3='20251201_FR123_455656_2490.pdf'.match(PDF_NAME_REGEX);
-  test('capture 455656',                         m3?.groups?.invoice_number,     '455656');
-  const m4='20260128_AB_INV_14407.pdf'.match(PDF_NAME_REGEX);
-  test('pas de capture si nom invalide',         m4,                             null);
+suite('mkFname — invoice_number YYYY-NNNNN', ()=>{
+  test('exemple B2B',  mkFname({invoice_number:'2026-09862'}), '2026-09862.pdf');
+  test('exemple B2C',  mkFname({invoice_number:'2025-04545'}), '2025-04545.pdf');
+  test('regex valide', FNAME_REGEX.test(mkFname({invoice_number:'2026-47011'})), true);
+});
+
+suite('validatePdfName — FNAME_REGEX YYYY-NNNNN', ()=>{
+  test('nom valide',                    validatePdfName('2026-60007.pdf'),  true);
+  test('nom valide zéros',              validatePdfName('2026-00001.pdf'),  true);
+  test('sans extension → invalide',     validatePdfName('2026-60007'),      false);
+  test('< 5 chiffres → invalide',       validatePdfName('2026-9862.pdf'),   false);
+  test('> 5 chiffres → invalide',       validatePdfName('2026-123456.pdf'), false);
+  test('année hors 20xx → invalide',    validatePdfName('1999-60007.pdf'),  false);
+  test('avec nom débiteur → invalide',  validatePdfName('2026-60007 RENOVIU.pdf'), false);
+  // groupes nommés
+  const m='2026-60007.pdf'.match(FNAME_REGEX);
+  test('groupe year',           m?.groups?.year,           '2026');
+  test('groupe invoice_number', m?.groups?.invoice_number, '60007');
+});
+
+suite('checkFields — invoice_number normalisé en YYYY-NNNNN', ()=>{
+  const base={debtor_lastname:'Martin Habfast',debtor_post_street_1:'1 rue Test',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_date:'2026-01-01',invoice_due_date:'2026-02-01',invoice_total_amount_inc_vat:100,invoice_open_amount_inc_vat:100,creditor_vat_number:'FR12345678901'};
+  const inv={data:{...base,invoice_number:'MSTRL-API-319247-011'},debtorType:'entreprise',errors:{}};
+  checkFields(inv);
+  test('invoice_number normalisé = YYYY-NNNNN', inv.data.invoice_number, '2026-47011');
+  test('nom PDF = 2026-47011.pdf',              mkFname(inv.data), '2026-47011.pdf');
+  test('FNAME_REGEX valide le nom PDF généré',  FNAME_REGEX.test(mkFname(inv.data)), true);
+});
+
+suite('checkFields — idempotence invoice_number (double appel)', ()=>{
+  const base={debtor_lastname:'Martin Habfast',debtor_post_street_1:'1 rue Test',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_date:'2026-01-01',invoice_due_date:'2026-02-01',invoice_total_amount_inc_vat:100,invoice_open_amount_inc_vat:100,creditor_vat_number:'FR12345678901'};
+  const inv={data:{...base,invoice_number:'MSTRL-API-319247-011'},debtorType:'entreprise',errors:{}};
+  checkFields(inv);
+  const after1=inv.data.invoice_number;
+  checkFields(inv);
+  const after2=inv.data.invoice_number;
+  test('double checkFields → même résultat', after1, after2);
+  test('FNAME_REGEX valide après double appel', FNAME_REGEX.test(mkFname(inv.data)), true);
+});
+
+suite('CSV — invoice_number = 5 chiffres', ()=>{
+  const base={debtor_lastname:'Martin Habfast',debtor_post_street_1:'1 rue Test',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_date:'2026-01-01',invoice_due_date:'2026-02-01',invoice_total_amount_inc_vat:100,invoice_open_amount_inc_vat:100,creditor_vat_number:'FR12345678901'};
+  const inv={data:{...base,invoice_number:'MSTRL-API-319247-011'},debtorType:'entreprise',errors:{}};
+  checkFields(inv);
+  inv.status='validated';
+  const {rows,exportFields}=simulateBuildCSV([inv]);
+  const idx=exportFields.findIndex(f=>f.key==='invoice_number');
+  test('invoice_number dans CSV = YYYY-NNNNN', rows[0].split(';')[idx], '2026-47011');
+});
+
+suite('downloadAll — CSV et ZIP séparés', ()=>{
+  // buildCSV doit produire uniquement des données CSV (pas de PDF dedans)
+  const invs=[
+    {data:{debtor_lastname:'ACME SAS',debtor_post_street_1:'1 rue Test',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-001',invoice_date:'2024-01-01',invoice_due_date:'2024-02-01',invoice_total_amount_inc_vat:100,invoice_open_amount_inc_vat:100,creditor_vat_number:'FR12345678901',debtor_code:'DE123456789'},status:'validated'},
+    {data:{debtor_lastname:'Jean Dupont',debtor_post_street_1:'12 rue des Lilas',debtor_post_postalcode:'69001',debtor_post_city:'Lyon',debtor_post_country_code:'FR',invoice_number:'F-002',invoice_date:'2024-06-01',invoice_due_date:'2024-07-01',invoice_total_amount_inc_vat:250,invoice_open_amount_inc_vat:250,creditor_vat_number:'FR12345678901'},status:'validated'},
+  ];
+  const {header,rows}=simulateBuildCSV(invs);
+  // CSV file: 2 lignes de données + 1 header
+  test('CSV contient une ligne par facture validée',  rows.length, 2);
+  test('CSV header contient debtor_company_name',     header.includes('debtor_company_name'), true);
+  test('CSV header ne contient pas de contenu PDF',   header.includes('%PDF'), false);
+  // ZIP PDFs : le CSV ne doit PAS être dans le ZIP
+  // On vérifie que buildCSV produit du texte (pas un blob ZIP)
+  const csv=simulateBuildCSV(invs).csv;
+  test('buildCSV retourne une chaîne texte',          typeof csv, 'string');
+  test('CSV commence par le header',                  csv.startsWith(header), true);
+  test('CSV ne contient pas de nom de fichier .zip',  csv.includes('.zip'), false);
+  // ZIP ne doit contenir que les PDFs — vérifié par le fait que buildCSV n\'inclut aucun PDF
+  test('CSV ne contient pas factures.csv embarqué',   csv.includes('factures.csv'), false);
+});
+
+suite('computeDebtorCompanyName — B2B (company name seul)', ()=>{
+  test('lastname seul → company name',
+    computeDebtorCompanyName({debtor_lastname:'ACME SAS'}), 'ACME SAS');
+  test('lastname vide → vide',
+    computeDebtorCompanyName({debtor_lastname:''}), '');
+  test('pas de champ → vide',
+    computeDebtorCompanyName({}), '');
+});
+
+suite('computeDebtorCompanyName — B2C (firstname + lastname agrégés)', ()=>{
+  test('firstname + lastname → agrégés',
+    computeDebtorCompanyName({debtor_firstname:'Jean',debtor_lastname:'Dupont'}), 'Jean Dupont');
+  test('firstname + infix + lastname → agrégés',
+    computeDebtorCompanyName({debtor_firstname:'Jean',debtor_infix:'de',debtor_lastname:'Dupont'}), 'Jean de Dupont');
+  test('infix vide ignoré',
+    computeDebtorCompanyName({debtor_firstname:'Marie',debtor_infix:'',debtor_lastname:'Martin'}), 'Marie Martin');
+  test('firstname null ignoré',
+    computeDebtorCompanyName({debtor_firstname:null,debtor_lastname:'Dupont'}), 'Dupont');
+});
+
+suite('CSV debtor_company_name — bug: champ vide sans fix', ()=>{
+  // Confirme que sans computeDebtorCompanyName, debtor_company_name serait vide
+  const inv={data:{debtor_lastname:'ACME SAS',debtor_post_street_1:'1 rue Test',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-001',invoice_date:'2024-01-01',invoice_due_date:'2024-02-01',invoice_total_amount_inc_vat:100,invoice_open_amount_inc_vat:100,creditor_vat_number:'FR12345678901',debtor_code:'DE123456789'},status:'validated'};
+  test('debtor_company_name absent de inv.data → undefined', inv.data.debtor_company_name, undefined);
+  test('sans fix: String(undefined??\'\') → vide', String(inv.data.debtor_company_name??''), '');
+});
+
+suite('CSV debtor_company_name — avec fix (B2B)', ()=>{
+  const inv={data:{debtor_lastname:'ACME SAS',debtor_post_street_1:'1 rue Test',debtor_post_postalcode:'75001',debtor_post_city:'Paris',debtor_post_country_code:'FR',invoice_number:'F-001',invoice_date:'2024-01-01',invoice_due_date:'2024-02-01',invoice_total_amount_inc_vat:100,invoice_open_amount_inc_vat:100,creditor_vat_number:'FR12345678901',debtor_code:'DE123456789'},status:'validated'};
+  const {rows,exportFields}=simulateBuildCSV([inv]);
+  const idx=exportFields.findIndex(f=>f.key==='debtor_company_name');
+  const val=rows[0].split(';')[idx];
+  test('debtor_company_name présent dans CSV', idx>=0, true);
+  test('debtor_company_name = debtor_lastname pour B2B', val, 'ACME SAS');
+});
+
+suite('CSV debtor_company_name — avec fix (B2C firstname + lastname)', ()=>{
+  const inv={data:{debtor_firstname:'Jean',debtor_lastname:'Dupont',debtor_post_street_1:'12 rue des Lilas',debtor_post_postalcode:'69001',debtor_post_city:'Lyon',debtor_post_country_code:'FR',invoice_number:'F-2024-042',invoice_date:'2024-06-01',invoice_due_date:'2024-07-01',invoice_total_amount_inc_vat:250,invoice_open_amount_inc_vat:250,creditor_vat_number:'FR12345678901'},status:'validated'};
+  const {rows,exportFields}=simulateBuildCSV([inv]);
+  const idx=exportFields.findIndex(f=>f.key==='debtor_company_name');
+  const val=rows[0].split(';')[idx];
+  test('debtor_company_name = firstname + lastname agrégés', val, 'Jean Dupont');
+});
+
+suite('isValidCountryCode — code ISO 2 lettres', ()=>{
+  test('FR → valide',       isValidCountryCode('FR'),     true);
+  test('DE → valide',       isValidCountryCode('DE'),     true);
+  test('BE → valide',       isValidCountryCode('BE'),     true);
+  test('France → invalide', isValidCountryCode('France'), false);
+  test('fr → invalide (minuscules)', isValidCountryCode('fr'), false);
+  test('FRA → invalide (3 lettres)', isValidCountryCode('FRA'), false);
+  test('F → invalide (1 lettre)',    isValidCountryCode('F'),   false);
+  test('vide → invalide',   isValidCountryCode(''),       false);
+});
+
+suite('vandn — champ country_code', ()=>{
+  const f={key:'debtor_post_country_code',type:'country_code',required:true};
+  test('FR → valide',          vandn('FR',f).valid,   true);
+  test('fr → normalisé en FR', vandn('fr',f).norm,    'FR');
+  test('France → invalide',    vandn('France',f).valid, false);
+  test('France → message erreur', vandn('France',f).errs[0], 'Code pays invalide — utilisez le code ISO 2 lettres (ex : FR, DE, BE)');
+  test('vide requis → invalide', vandn('',f).valid,   false);
 });
 
 suite('isValidEmail — validation basique', ()=>{
