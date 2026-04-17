@@ -1131,8 +1131,8 @@ function fmtDate(date){return String(date||'').slice(0,4);}
 function fmtInvref(val){const digits=String(val||'').replace(/\D/g,'');return digits.slice(-5).padStart(5,'0');}
 function fmtDebcode(data){const name=computeDebtorCompanyName(data)||data.debtor_lastname||'';return String(name).replace(/[\/\\:*?"<>|]/g,' ').replace(/\s+/g,' ').trim().slice(0,60);}
 function fmtAmount(val){const s=String(val).trim();if(s.includes('.')){return s.replace(/\.?0+$/,'').replace('.','');}return s;}
-const FNAME_REGEX=/^(?<year>20\d{2})-(?<invoice_number>\d{5})\.pdf$/;
-function mkFname(data){return`${data.invoice_number}.pdf`;}
+const FNAME_REGEX=/^(?<invoice_number>\d{4}-\d{5})\s.*\.pdf$/;
+function mkFname(data){return`${data.invoice_number} ${fmtDebcode(data)}.pdf`;}
 function getPdfFilename(inv){
   const name=mkFname(inv.data);
   if(FNAME_REGEX.test(name)) return name;

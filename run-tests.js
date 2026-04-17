@@ -118,8 +118,8 @@ function fmtDate(date){return String(date||'').slice(0,4);}
 function fmtInvref(val){const digits=String(val||'').replace(/\D/g,'');return digits.slice(-5).padStart(5,'0');}
 function fmtDebcode(data){const name=computeDebtorCompanyName(data)||data.debtor_lastname||'';return String(name).replace(/[\/\\:*?"<>|]/g,' ').replace(/\s+/g,' ').trim().slice(0,60);}
 function fmtAmount(val){const s=String(val).trim();if(s.includes('.')){return s.replace(/\.?0+$/,'').replace('.','');}return s;}
-const FNAME_REGEX=/^(?<year>20\d{2})-(?<invoice_number>\d{5})\.pdf$/;
-function mkFname(data){return`${data.invoice_number}.pdf`;}
+const FNAME_REGEX=/^(?<invoice_number>\d{4}-\d{5})\s.*\.pdf$/;
+function mkFname(data){return`${data.invoice_number} ${fmtDebcode(data)}.pdf`;}
 function validatePdfName(name){return FNAME_REGEX.test(name);}
 function canShowFinishButton(invoices){if(!invoices.length)return false;return invoices.every(x=>x.status==='validated'||x.status==='skipped');}
 function shouldWarnBeforeExport(invoices){return invoices.some(x=>x.status==='skipped');}
@@ -1576,24 +1576,23 @@ suite('fmtAmount — montant en centimes', ()=>{
   test('100.10 → 1001',    fmtAmount('100.10'),  '1001');
 });
 
-suite('mkFname — invoice_number YYYY-NNNNN', ()=>{
-  test('exemple B2B',  mkFname({invoice_number:'2026-09862'}), '2026-09862.pdf');
-  test('exemple B2C',  mkFname({invoice_number:'2025-04545'}), '2025-04545.pdf');
-  test('regex valide', FNAME_REGEX.test(mkFname({invoice_number:'2026-47011'})), true);
+suite('mkFname — YYYY-NNNNN DEBTOR.pdf', ()=>{
+  test('exemple B2B',  mkFname({invoice_number:'2026-09862',debtor_lastname:'ACME SAS'}),    '2026-09862 ACME SAS.pdf');
+  test('exemple B2C',  mkFname({invoice_number:'2025-04545',debtor_lastname:'Jean Dupont'}), '2025-04545 Jean Dupont.pdf');
+  test('regex valide', FNAME_REGEX.test(mkFname({invoice_number:'2026-47011',debtor_lastname:'RENOVIU'})), true);
 });
 
-suite('validatePdfName — FNAME_REGEX YYYY-NNNNN', ()=>{
-  test('nom valide',                    validatePdfName('2026-60007.pdf'),  true);
-  test('nom valide zéros',              validatePdfName('2026-00001.pdf'),  true);
-  test('sans extension → invalide',     validatePdfName('2026-60007'),      false);
-  test('< 5 chiffres → invalide',       validatePdfName('2026-9862.pdf'),   false);
-  test('> 5 chiffres → invalide',       validatePdfName('2026-123456.pdf'), false);
-  test('année hors 20xx → invalide',    validatePdfName('1999-60007.pdf'),  false);
-  test('avec nom débiteur → invalide',  validatePdfName('2026-60007 RENOVIU.pdf'), false);
-  // groupes nommés
-  const m='2026-60007.pdf'.match(FNAME_REGEX);
-  test('groupe year',           m?.groups?.year,           '2026');
-  test('groupe invoice_number', m?.groups?.invoice_number, '60007');
+suite('validatePdfName — FNAME_REGEX YYYY-NNNNN DEBTOR.pdf', ()=>{
+  test('nom valide exemple concret',    validatePdfName('2026-60007 RENOVIU.pdf'),   true);
+  test('nom valide B2C',               validatePdfName('2026-00001 Jean Dupont.pdf'), true);
+  test('sans debtor → invalide',        validatePdfName('2026-60007.pdf'),            false);
+  test('sans extension → invalide',     validatePdfName('2026-60007 RENOVIU'),        false);
+  test('< 5 chiffres → invalide',       validatePdfName('2026-9862 RENOVIU.pdf'),     false);
+  test('> 5 chiffres → invalide',       validatePdfName('2026-123456 RENOVIU.pdf'),   false);
+  test('année != 4 chiffres → invalide',validatePdfName('26-60007 RENOVIU.pdf'),      false);
+  // groupe nommé invoice_number = YYYY-NNNNN
+  const m='2026-60007 RENOVIU.pdf'.match(FNAME_REGEX);
+  test('groupe invoice_number', m?.groups?.invoice_number, '2026-60007');
 });
 
 suite('checkFields — invoice_number normalisé en YYYY-NNNNN', ()=>{
@@ -1601,7 +1600,7 @@ suite('checkFields — invoice_number normalisé en YYYY-NNNNN', ()=>{
   const inv={data:{...base,invoice_number:'MSTRL-API-319247-011'},debtorType:'entreprise',errors:{}};
   checkFields(inv);
   test('invoice_number normalisé = YYYY-NNNNN', inv.data.invoice_number, '2026-47011');
-  test('nom PDF = 2026-47011.pdf',              mkFname(inv.data), '2026-47011.pdf');
+  test('nom PDF = 2026-47011 Martin Habfast.pdf', mkFname(inv.data), '2026-47011 Martin Habfast.pdf');
   test('FNAME_REGEX valide le nom PDF généré',  FNAME_REGEX.test(mkFname(inv.data)), true);
 });
 
