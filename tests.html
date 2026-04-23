@@ -876,6 +876,58 @@ html.push(runSuite('buildClaudeRequestBody', [
   {desc:'Pas de x-api-key dans le body (côté serveur uniquement)', input:{b64:'abc', prompt:'test'}, expected:undefined, fn:({b64,prompt})=>buildClaudeRequestBody(b64,prompt)['x-api-key']},
 ]));
 
+/* ══ SECURITY HELPERS (pure logic mirrored from invoice-processor) ══ */
+
+// 1. Inactivity timer
+function getInactivityTimeoutMs() { return 10 * 60 * 1000; }
+function isSessionExpired(lastActivityMs, nowMs, timeoutMs) {
+  return (nowMs - lastActivityMs) >= timeoutMs;
+}
+
+// 2. Session banner
+function shouldShowBanner(invoiceCount) { return invoiceCount > 0; }
+function getBannerCountText(invoiceCount) { return String(invoiceCount); }
+
+// 3. Clear session
+function getEmptySessionState(current) {
+  return { ...current, invoices: [], files: [], cur: -1, busy: false, zipDownloaded: false };
+}
+
+html.push('<h2>Sécurité — Timer d\'inactivité</h2>');
+html.push(runSuite('getInactivityTimeoutMs', [
+  {desc:'Timeout = 10 minutes (600 000 ms)', input:null, expected:600000, fn:()=>getInactivityTimeoutMs()},
+]));
+html.push(runSuite('isSessionExpired', [
+  {desc:'Expiré après exactement 10 min',     input:{last:0, now:600000,  timeout:600000}, expected:true,  fn:({last,now,timeout})=>isSessionExpired(last,now,timeout)},
+  {desc:'Expiré après 11 min',                input:{last:0, now:660000,  timeout:600000}, expected:true,  fn:({last,now,timeout})=>isSessionExpired(last,now,timeout)},
+  {desc:'Pas expiré après 9 min 59 s',        input:{last:0, now:599999,  timeout:600000}, expected:false, fn:({last,now,timeout})=>isSessionExpired(last,now,timeout)},
+  {desc:'Pas expiré immédiatement (t=0)',      input:{last:0, now:0,       timeout:600000}, expected:false, fn:({last,now,timeout})=>isSessionExpired(last,now,timeout)},
+  {desc:'Activité récente remet à zéro',       input:{last:500000, now:600000, timeout:600000}, expected:false, fn:({last,now,timeout})=>isSessionExpired(last,now,timeout)},
+]));
+
+html.push('<h2>Sécurité — Bannière de session active</h2>');
+html.push(runSuite('shouldShowBanner', [
+  {desc:'0 facture → masquée',   input:0, expected:false, fn:shouldShowBanner},
+  {desc:'1 facture → visible',   input:1, expected:true,  fn:shouldShowBanner},
+  {desc:'5 factures → visible',  input:5, expected:true,  fn:shouldShowBanner},
+  {desc:'20 factures → visible', input:20,expected:true,  fn:shouldShowBanner},
+]));
+html.push(runSuite('getBannerCountText', [
+  {desc:'Affiche "0" pour 0 facture',  input:0,  expected:'0',  fn:getBannerCountText},
+  {desc:'Affiche "1" pour 1 facture',  input:1,  expected:'1',  fn:getBannerCountText},
+  {desc:'Affiche "20" pour 20 factures',input:20,expected:'20', fn:getBannerCountText},
+]));
+
+html.push('<h2>Sécurité — Effacement de session (clearSession)</h2>');
+html.push(runSuite('getEmptySessionState', [
+  {desc:'invoices vidé',         input:{invoices:[{id:1}],files:[],cur:0,busy:false,zipDownloaded:false}, expected:[],    fn:(s)=>getEmptySessionState(s).invoices},
+  {desc:'files vidé',            input:{invoices:[],files:[{name:'a.pdf'}],cur:0,busy:false,zipDownloaded:false}, expected:[], fn:(s)=>getEmptySessionState(s).files},
+  {desc:'cur remis à -1',        input:{invoices:[],files:[],cur:3,busy:false,zipDownloaded:false}, expected:-1,   fn:(s)=>getEmptySessionState(s).cur},
+  {desc:'busy remis à false',    input:{invoices:[],files:[],cur:0,busy:true, zipDownloaded:false}, expected:false, fn:(s)=>getEmptySessionState(s).busy},
+  {desc:'zipDownloaded remis à false', input:{invoices:[],files:[],cur:0,busy:false,zipDownloaded:true}, expected:false, fn:(s)=>getEmptySessionState(s).zipDownloaded},
+  {desc:'Autres champs préservés (nomSep)',input:{invoices:[],files:[],cur:0,busy:false,zipDownloaded:false,nomSep:'_'}, expected:'_', fn:(s)=>getEmptySessionState(s).nomSep},
+]));
+
 const summary = `<div class="summary">
     <div><div class="sum-n" style="color:#085041;">${totalPass}</div><div class="sum-l">Tests passés</div></div>
     <div><div class="sum-n" style="color:${totalFail>0?'#c0392b':'#085041'};">${totalFail}</div><div class="sum-l">Tests échoués</div></div>

@@ -246,6 +246,10 @@ body{background:linear-gradient(135deg,#dcf6f7 0%,#edfcfd 35%,#d5f2e5 70%,#e8faf
 .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;}
 .spin-d{border:2px solid var(--bd2);border-top-color:var(--teal);}
 @keyframes sp{to{transform:rotate(360deg);}}
+/* SESSION BANNER */
+.session-banner{display:none;align-items:center;justify-content:space-between;padding:7px 18px;background:var(--amber-bg);border-bottom:.5px solid var(--amber);font-size:12px;color:var(--amber-text);flex-shrink:0;gap:10px;}
+.session-banner.show{display:flex;}
+.session-banner-msg{display:flex;align-items:center;gap:6px;}
 </style>
 </head>
 <body>
@@ -283,6 +287,15 @@ body{background:linear-gradient(135deg,#dcf6f7 0%,#edfcfd 35%,#d5f2e5 70%,#e8faf
       <button class="btn btn-sm" id="btnExport" onclick="showExport()" style="display:none;">Exporter</button>
       <button class="btn btn-p btn-sm" id="btnExtract" onclick="startExtraction()" disabled>Extraire les données</button>
     </div>
+  </div>
+
+  <!-- session active banner -->
+  <div class="session-banner" id="sessionBanner">
+    <div class="session-banner-msg">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.2"/><path d="M7 4v3.5M7 9.5v.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      Session active — <span id="sessionCount">0</span> facture(s) en mémoire
+    </div>
+    <button class="btn btn-sm" style="background:var(--red);color:#fff;border-color:var(--red);font-size:11px;" onclick="clearSession()">Effacer et quitter</button>
   </div>
 
   <div class="layout">
@@ -717,6 +730,7 @@ function renderSidebar() {
   } else {
     sec.classList.remove('has-items');
   }
+  updateSessionBanner();
 }
 function shortName(n){return n.replace(/\.pdf$/i,'');}
 
@@ -1309,6 +1323,23 @@ function closeCountryDrop(){
   const drop=document.getElementById('countryDrop');
   if(drop) drop.classList.remove('open');
 }
+
+/* ══ INACTIVITY TIMER ════════════════════════════════ */
+let _inactivityTimer;
+function resetInactivityTimer(){
+  clearTimeout(_inactivityTimer);
+  _inactivityTimer=setTimeout(()=>{S.invoices=[];location.reload();},10*60*1000);
+}
+['mousemove','keydown','click','scroll'].forEach(ev=>document.addEventListener(ev,resetInactivityTimer));
+resetInactivityTimer();
+
+/* ══ SESSION BANNER ══════════════════════════════════ */
+function updateSessionBanner(){
+  const n=S.invoices.length;
+  document.getElementById('sessionCount').textContent=n;
+  document.getElementById('sessionBanner').classList.toggle('show',n>0);
+}
+function clearSession(){S.invoices=[];S.files=[];S.cur=-1;S.busy=false;S.zipDownloaded=false;location.reload();}
 
 /* ══ UTILS ═══════════════════════════════════════════ */
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
