@@ -928,12 +928,54 @@ html.push(runSuite('getEmptySessionState', [
   {desc:'Autres champs préservés (nomSep)',input:{invoices:[],files:[],cur:0,busy:false,zipDownloaded:false,nomSep:'_'}, expected:'_', fn:(s)=>getEmptySessionState(s).nomSep},
 ]));
 
-const summary = `<div class="summary">
+/* ══ ADMIN AUTH HELPERS ══ */
+
+// Mirror of sha256 from admin.html (sync wrapper for test purposes)
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+function isAdminAuthenticated(storage) {
+  return storage.getItem('adminAuth') === '1';
+}
+
+function getSettingsButtonDisplay(isAdmin) {
+  return isAdmin ? '' : 'none';
+}
+
+html.push('<h2>Admin — Authentification</h2>');
+// Async SHA-256 tests run after sync suite
+(async () => {
+  const knownHash = await sha256('admin@test.com:secret');
+  const wrongHash = await sha256('admin@test.com:wrong');
+
+  html.push(runSuite('sha256 (admin credentials)', [
+    {desc:'Hash déterministe pour mêmes inputs', input:'admin@test.com:secret', expected:knownHash, fn:()=>knownHash},
+    {desc:'Hash différent si mdp différent', input:null, expected:false, fn:()=>knownHash===wrongHash},
+    {desc:'Hash est une string hex de 64 chars', input:'admin@test.com:secret', expected:64, fn:()=>knownHash.length},
+    {desc:'Email en minuscules dans le hash', input:null, expected:knownHash, fn:async()=>await sha256('ADMIN@TEST.COM:secret')},
+  ]));
+
+  html.push(runSuite('isAdminAuthenticated', [
+    {desc:'adminAuth="1" → authentifié', input:null, expected:true,  fn:()=>isAdminAuthenticated({getItem:()=>'1'})},
+    {desc:'adminAuth="0" → non authentifié', input:null, expected:false, fn:()=>isAdminAuthenticated({getItem:()=>'0'})},
+    {desc:'adminAuth=null → non authentifié', input:null, expected:false, fn:()=>isAdminAuthenticated({getItem:()=>null})},
+    {desc:'adminAuth="" → non authentifié',   input:null, expected:false, fn:()=>isAdminAuthenticated({getItem:()=>''})},
+  ]));
+
+  html.push(runSuite('getSettingsButtonDisplay', [
+    {desc:'Admin → bouton visible (display="")',    input:true,  expected:'',     fn:getSettingsButtonDisplay},
+    {desc:'Non-admin → bouton caché (display="none")', input:false, expected:'none', fn:getSettingsButtonDisplay},
+  ]));
+
+  document.getElementById('root').innerHTML = `<div class="summary">
     <div><div class="sum-n" style="color:#085041;">${totalPass}</div><div class="sum-l">Tests passés</div></div>
     <div><div class="sum-n" style="color:${totalFail>0?'#c0392b':'#085041'};">${totalFail}</div><div class="sum-l">Tests échoués</div></div>
     <div><div class="sum-n">${totalPass+totalFail}</div><div class="sum-l">Total</div></div>
-  </div>`;
-document.getElementById('root').innerHTML = summary + html.join('');
+  </div>` + html.join('');
+})();
+
 </script>
 </body>
 </html>

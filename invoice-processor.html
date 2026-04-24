@@ -263,7 +263,7 @@ html,body{overflow:hidden;}
     </div>
     <div class="topbar-right">
       <button class="btn btn-ghost btn-sm" id="btnClearSession" onclick="confirmClearSession()" style="display:none;">Quitter la session et effacer vos factures</button>
-      <button class="btn btn-ghost btn-sm" onclick="openModal()">Paramètres</button>
+      <button class="btn btn-ghost btn-sm" id="btnSettings" style="display:none;" onclick="openModal()">Paramètres</button>
       <button class="btn btn-neutral btn-sm" id="btnExport" onclick="showExport()" style="display:none;">Exporter</button>
       <button class="btn btn-primary btn-sm" id="btnExtract" onclick="startExtraction()" disabled>Extraire les données</button>
     </div>
@@ -1347,6 +1347,9 @@ function clearSession(){
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function toB64(f){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=()=>rej(new Error('Lecture échouée'));r.readAsDataURL(f);});}
 if(typeof pdfjsLib!=='undefined') pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+if(sessionStorage.getItem('adminAuth')==='1'){
+  document.getElementById('btnSettings').style.display='';
+}
 console.log('%cPDF2Payt — version 56','color:#55D6DE;font-weight:700;font-size:13px;');
 </script>
 <div id="versionTag" style="position:fixed;bottom:10px;left:14px;font-size:11px;color:var(--text3);z-index:9999;pointer-events:none;">version 56</div>

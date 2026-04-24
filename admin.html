@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>PDF2Payt — Admin</title>
+<link rel="stylesheet" href="payt-design.css"/>
+<style>
+html,body{height:100%;overflow:hidden;}
+.login-wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;}
+.login-card{width:min(380px,92vw);padding:32px;background:rgba(255,255,255,0.75);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.90);border-radius:var(--radius-xl);box-shadow:0 8px 32px rgba(85,214,222,0.08),0 2px 8px rgba(0,0,0,0.05);}
+.login-title{font-size:20px;font-weight:700;color:var(--navy);margin-bottom:4px;}
+.login-sub{font-size:13px;color:var(--muted);margin-bottom:24px;}
+.field{margin-bottom:16px;}
+.field label{display:block;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px;}
+.error-msg{display:none;font-size:12px;color:var(--red);background:var(--red-bg);border:1px solid var(--red-border);border-radius:var(--radius);padding:8px 12px;margin-bottom:16px;}
+.error-msg.show{display:block;}
+</style>
+</head>
+<body>
+<div class="blob blob-1"></div>
+<div class="blob blob-2"></div>
+<div class="blob blob-3"></div>
+
+<div class="login-wrap z-content">
+  <div class="login-card">
+    <div class="login-title">Accès administrateur</div>
+    <div class="login-sub">Réservé à la configuration de PDF2Payt.</div>
+    <div class="error-msg" id="errorMsg">Email ou mot de passe incorrect.</div>
+    <form onsubmit="handleLogin(event)">
+      <div class="field">
+        <label>Email</label>
+        <input class="input" type="email" id="inputEmail" autocomplete="email" required placeholder="admin@exemple.com"/>
+      </div>
+      <div class="field">
+        <label>Mot de passe</label>
+        <input class="input" type="password" id="inputPassword" autocomplete="current-password" required placeholder="••••••••"/>
+      </div>
+      <button class="btn btn-primary" style="width:100%;margin-top:4px;" type="submit" id="btnLogin">Se connecter</button>
+    </form>
+  </div>
+</div>
+
+<script>
+/* ── Credentials (SHA-256 hashes) ─────────────────────
+   Hash = SHA-256( email.toLowerCase() + ':' + password )
+   ──────────────────────────────────────────────────── */
+const ADMIN_HASH = 'a2612620983848f636d2fbe96e729dbdda0535bccad4f616a2ec89bbfba59dbf';
+
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+async function handleLogin(e) {
+  e.preventDefault();
+  const btn = document.getElementById('btnLogin');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+
+  const email = document.getElementById('inputEmail').value.trim().toLowerCase();
+  const password = document.getElementById('inputPassword').value;
+  const hash = await sha256(email + ':' + password);
+
+  if (hash === ADMIN_HASH) {
+    sessionStorage.setItem('adminAuth', '1');
+    window.location.href = '/';
+  } else {
+    document.getElementById('errorMsg').classList.add('show');
+    btn.disabled = false;
+    btn.textContent = 'Se connecter';
+  }
+}
+</script>
+</body>
+</html>
