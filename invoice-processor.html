@@ -234,6 +234,20 @@ html,body{overflow:hidden;}
     <div class="dz-limit">Maximum 20 fichiers à la fois</div>
   </div>
   <input type="file" id="fi1" multiple accept=".pdf" style="display:none;" onchange="handleFiles(this.files)"/>
+  <div style="margin-top:1.5rem;width:min(500px,90vw);background:#122C43;border-radius:var(--radius-lg);padding:14px 16px;display:flex;align-items:flex-start;gap:12px;">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;margin-top:2px;" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </svg>
+    <div style="font-size:12px;color:#fff;line-height:1.6;">
+      Les factures uploadées sont traitées localement et disparaissent dès que :
+      <ul style="list-style:none;margin:6px 0 6px;padding:0;display:flex;flex-direction:column;gap:4px;">
+        <li style="display:flex;align-items:center;gap:6px;"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#55D6DE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6h8M7 3l3 3-3 3"/></svg>Vous fermez cet onglet</li>
+        <li style="display:flex;align-items:center;gap:6px;"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#55D6DE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6h8M7 3l3 3-3 3"/></svg>Vous cliquez sur "Nouvelle session" ou "Quitter la session"</li>
+        <li style="display:flex;align-items:center;gap:6px;"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#55D6DE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6h8M7 3l3 3-3 3"/></svg>10 minutes d'inactivité s'écoulent</li>
+      </ul>
+      Aucune donnée n'est stockée ni transmise à un serveur tiers.
+    </div>
+  </div>
 </div>
 
 <!-- ═══ MAIN ══════════════════════════════════════ -->
@@ -248,19 +262,11 @@ html,body{overflow:hidden;}
       </div>
     </div>
     <div class="topbar-right">
+      <button class="btn btn-ghost btn-sm" id="btnClearSession" onclick="confirmClearSession()" style="display:none;">Quitter la session et effacer vos factures</button>
       <button class="btn btn-ghost btn-sm" onclick="openModal()">Paramètres</button>
       <button class="btn btn-neutral btn-sm" id="btnExport" onclick="showExport()" style="display:none;">Exporter</button>
       <button class="btn btn-primary btn-sm" id="btnExtract" onclick="startExtraction()" disabled>Extraire les données</button>
     </div>
-  </div>
-
-  <!-- session active banner -->
-  <div class="session-banner" id="sessionBanner">
-    <div class="session-banner-msg">
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.2"/><path d="M7 4v3.5M7 9.5v.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-      Session active — <span id="sessionCount">0</span> facture(s) en mémoire
-    </div>
-    <button class="btn btn-danger btn-sm" onclick="clearSession()">Effacer et quitter</button>
   </div>
 
   <div class="layout">
@@ -348,6 +354,20 @@ html,body{overflow:hidden;}
     <div style="margin-top:1.25rem;padding:14px 16px;background:rgba(85,214,222,0.08);border:1px solid rgba(85,214,222,0.30);border-radius:var(--radius-lg);font-size:13px;color:var(--navy);line-height:1.6;">
       💡 En téléchargeant les éléments vous allez obtenir un fichier <strong>.zip</strong> contenant vos factures PDF renommées + un fichier <strong>CSV</strong>. Ces 2 documents sont nécessaires pour réaliser une importation manuelle sur Payt.
     </div>
+    <div style="margin-top:1rem;background:#122C43;border-radius:var(--radius-lg);padding:14px 16px;display:flex;align-items:flex-start;gap:12px;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;margin-top:2px;" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+      </svg>
+      <div style="font-size:12px;color:#fff;line-height:1.6;">
+        Les factures uploadées sont traitées localement et disparaissent dès que :
+        <ul style="list-style:none;margin:6px 0 6px;padding:0;display:flex;flex-direction:column;gap:4px;">
+          <li style="display:flex;align-items:center;gap:6px;"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#55D6DE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6h8M7 3l3 3-3 3"/></svg>Vous fermez cet onglet</li>
+          <li style="display:flex;align-items:center;gap:6px;"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#55D6DE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6h8M7 3l3 3-3 3"/></svg>Vous cliquez sur "Nouvelle session" ou "Quitter la session"</li>
+          <li style="display:flex;align-items:center;gap:6px;"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#55D6DE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6h8M7 3l3 3-3 3"/></svg>10 minutes d'inactivité s'écoulent</li>
+        </ul>
+        Aucune donnée n'est stockée ni transmise à un serveur tiers.
+      </div>
+    </div>
   </div>
 </div>
 
@@ -423,6 +443,18 @@ html,body{overflow:hidden;}
     <div class="modal-foot">
       <button class="btn btn-neutral" onclick="closeRestartWarn()">Annuler</button>
       <button class="btn btn-danger" onclick="doRestart()">Quitter sans télécharger</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ CLEAR SESSION CONFIRM ════════════════════════ -->
+<div class="modal-bg" id="clearSessionBg">
+  <div class="modal" onclick="event.stopPropagation()" style="max-width:400px;">
+    <div class="modal-title">Quitter la session</div>
+    <div class="modal-sub">Toutes vos factures et données extraites seront effacées. Cette action est irréversible.</div>
+    <div class="modal-foot">
+      <button class="btn btn-neutral" onclick="closeClearSession()">Annuler</button>
+      <button class="btn btn-danger" onclick="clearSession()">Effacer et quitter</button>
     </div>
   </div>
 </div>
@@ -1294,10 +1326,13 @@ resetInactivityTimer();
 /* ══ SESSION BANNER ══════════════════════════════════ */
 function updateSessionBanner(){
   const n=S.invoices.length;
-  document.getElementById('sessionCount').textContent=n;
-  document.getElementById('sessionBanner').classList.toggle('show',n>0);
+  document.getElementById('btnClearSession').style.display=n>0?'':'none';
+  document.getElementById('versionTag').style.display=n>0?'none':'';
 }
+function confirmClearSession(){document.getElementById('clearSessionBg').classList.add('show');}
+function closeClearSession(){document.getElementById('clearSessionBg').classList.remove('show');}
 function clearSession(){
+  closeClearSession();
   S.files=[];S.invoices=[];S.cur=-1;S.busy=false;S.zipDownloaded=false;
   hideExport();
   document.getElementById('screen-main').classList.remove('in');
@@ -1312,7 +1347,8 @@ function clearSession(){
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function toB64(f){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=()=>rej(new Error('Lecture échouée'));r.readAsDataURL(f);});}
 if(typeof pdfjsLib!=='undefined') pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+console.log('%cPDF2Payt — version 56','color:#55D6DE;font-weight:700;font-size:13px;');
 </script>
-<div style="position:fixed;bottom:10px;left:14px;font-size:11px;color:var(--text3);z-index:9999;pointer-events:none;">version 56</div>
+<div id="versionTag" style="position:fixed;bottom:10px;left:14px;font-size:11px;color:var(--text3);z-index:9999;pointer-events:none;">version 56</div>
 </body>
 </html>
