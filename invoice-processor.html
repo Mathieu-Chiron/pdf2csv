@@ -574,8 +574,8 @@ const EU_VAT_PATTERNS = {
   SE:/^SE[0-9]{12}$/,GB:/^GB([0-9]{9}|[0-9]{12}|GD[0-9]{3}|HA[0-9]{3})$/,CH:/^CHE[0-9]{9}$/,
 };
 const VAT_FIELDS=[
-  {label:'N° TVA créancier',key:'creditor_vat_number',type:'vat',required:false},
-  {label:'N° TVA débiteur', key:'debtor_vat_number',  type:'vat',required:false},
+  {label:'N° TVA créancier',key:'creditor_vat_number',type:'vat',required:true},
+  {label:'N° TVA débiteur', key:'debtor_vat_number',  type:'vat',required:true},
 ];
 const EXPORT_SCHEMA=[
   'administration_code',            // 1  (valeur de creditor_vat_number)
@@ -1001,7 +1001,8 @@ Règles :
 - Montant TTC ; si franchise TVA (art.293B), utilise le HT comme montant final.
 - Dates : format ISO YYYY-MM-DD.
 - Montants : nombre décimal sans symbole ni séparateur de milliers.
-- N° TVA : format CODE_PAYS + chiffres/lettres (ex: FR12345678901, DE123456789). Extraire le N° TVA du créancier et du débiteur si présents.
+- N° TVA créancier (creditor_vat_number) : extraire UNIQUEMENT le numéro de TVA de l'émetteur de la facture (le fournisseur/vendeur — celui qui réclame le paiement), jamais celui du client. Le créancier est l'entité QUI ÉMET la facture. Format : CODE_PAYS + chiffres/lettres (ex : FR12345678901, DE123456789).
+- N° TVA débiteur (debtor_vat_number) : numéro de TVA du client/acheteur (celui QUI PAIE), uniquement s'il est explicitement mentionné sur la facture. Même format.
 - Champ introuvable → null (JSON, pas la chaîne "null").
 - Ignore tout artefact textuel "null" dans le document.
 
@@ -1024,7 +1025,7 @@ JSON uniquement.`;
       } else { norm[f.key]=null; rawNorm[f.key]=false; }
     });
     if(!norm['debtor_post_country_code']) norm['debtor_post_country_code']='FR';
-    VAT_FIELDS.forEach(f=>{const raw=parsed.data[f.key];norm[f.key]=(raw&&raw!=='null')?normalizeVAT(raw):null;});
+    VAT_FIELDS.forEach(f=>{const raw=parsed.data[f.key];if(raw&&raw!=='null'){const n=normalizeVAT(raw);norm[f.key]=n||String(raw).replace(/[\s.\-]/g,'').toUpperCase();}else{norm[f.key]=null;}});
     norm.debtor_code=computeDebtorCode(norm);
     inv.data=norm;inv.rawNorm=rawNorm;inv.repaired=parsed.repaired||false;
     if(norm.debtor_vat_number) inv.debtorType='entreprise';
