@@ -928,6 +928,91 @@ html.push(runSuite('getEmptySessionState', [
   {desc:'Autres champs préservés (nomSep)',input:{invoices:[],files:[],cur:0,busy:false,zipDownloaded:false,nomSep:'_'}, expected:'_', fn:(s)=>getEmptySessionState(s).nomSep},
 ]));
 
+/* ══ DEBTOR TYPE — B2B / B2C ══ */
+
+// Mirror of debtor_is_company logic from buildCSV() in invoice-processor.html (line 1167)
+function getDebtorIsCompanyValue(debtorType) {
+  return debtorType === 'entreprise';
+}
+
+// Mirror of buildCSV() limited to a given schema — same special-case logic as the main app
+function buildCSVForSchema(invoices, schema) {
+  const validated = invoices.filter(i => i.status === 'validated');
+  const header = schema.map(k => `"${k}"`).join(';');
+  const rows = validated.map(inv => schema.map(k => {
+    let v;
+    if (k === 'debtor_is_company') v = inv.debtorType === 'entreprise';
+    else v = inv.data[k];
+    v = v ?? '';
+    return '"' + String(v).replace(/"/g, '""') + '"';
+  }).join(';'));
+  return [header, ...rows].join('\n');
+}
+
+const mkInvTyped = (status, debtorType, data = {}) => ({
+  file: { name: 'test.pdf' },
+  status,
+  debtorType,
+  data
+});
+
+html.push('<h2>B2B / B2C — debtor_is_company</h2>');
+html.push(runSuite('Valeur booléenne de debtor_is_company selon le type sélectionné', [
+  { desc: 'Bouton Particulier coché → false',
+    input: 'particulier', expected: false, fn: getDebtorIsCompanyValue },
+  { desc: 'Bouton Entreprise coché → true',
+    input: 'entreprise', expected: true, fn: getDebtorIsCompanyValue },
+  { desc: 'Type null (non sélectionné) → false',
+    input: null, expected: false, fn: getDebtorIsCompanyValue },
+  { desc: 'Chaîne vide → false',
+    input: '', expected: false, fn: getDebtorIsCompanyValue },
+]));
+
+html.push(runSuite('debtor_is_company dans le CSV — bouton Particulier', [
+  { desc: 'Particulier validée → cellule CSV vaut "false"',
+    input: [mkInvTyped('validated', 'particulier')],
+    expected: '"debtor_is_company"\n"false"',
+    fn: invoices => buildCSVForSchema(invoices, ['debtor_is_company']) },
+  { desc: 'Particulier → valeur est un booléen false (pas la string "false")',
+    input: mkInvTyped('validated', 'particulier'),
+    expected: false,
+    fn: inv => getDebtorIsCompanyValue(inv.debtorType) },
+  { desc: 'Particulier non validée (extracted) → exclue du CSV',
+    input: [mkInvTyped('extracted', 'particulier')],
+    expected: '"debtor_is_company"',
+    fn: invoices => buildCSVForSchema(invoices, ['debtor_is_company']) },
+  { desc: 'Particulier ignorée (skipped) → exclue du CSV',
+    input: [mkInvTyped('skipped', 'particulier')],
+    expected: '"debtor_is_company"',
+    fn: invoices => buildCSVForSchema(invoices, ['debtor_is_company']) },
+]));
+
+html.push(runSuite('debtor_is_company dans le CSV — bouton Entreprise', [
+  { desc: 'Entreprise validée → cellule CSV vaut "true"',
+    input: [mkInvTyped('validated', 'entreprise')],
+    expected: '"debtor_is_company"\n"true"',
+    fn: invoices => buildCSVForSchema(invoices, ['debtor_is_company']) },
+  { desc: 'Entreprise → valeur est un booléen true (pas la string "true")',
+    input: mkInvTyped('validated', 'entreprise'),
+    expected: true,
+    fn: inv => getDebtorIsCompanyValue(inv.debtorType) },
+]));
+
+html.push(runSuite('debtor_is_company — mix B2B et B2C', [
+  { desc: 'Particulier puis Entreprise → "false" puis "true" dans le CSV',
+    input: [mkInvTyped('validated', 'particulier'), mkInvTyped('validated', 'entreprise')],
+    expected: '"debtor_is_company"\n"false"\n"true"',
+    fn: invoices => buildCSVForSchema(invoices, ['debtor_is_company']) },
+  { desc: 'Particulier ignorée + Entreprise validée → seulement "true"',
+    input: [mkInvTyped('skipped', 'particulier'), mkInvTyped('validated', 'entreprise')],
+    expected: '"debtor_is_company"\n"true"',
+    fn: invoices => buildCSVForSchema(invoices, ['debtor_is_company']) },
+  { desc: 'Entreprise ignorée + Particulier validée → seulement "false"',
+    input: [mkInvTyped('skipped', 'entreprise'), mkInvTyped('validated', 'particulier')],
+    expected: '"debtor_is_company"\n"false"',
+    fn: invoices => buildCSVForSchema(invoices, ['debtor_is_company']) },
+]));
+
 /* ══ ADMIN AUTH HELPERS ══ */
 
 // Mirror of sha256 from admin.html (sync wrapper for test purposes)
