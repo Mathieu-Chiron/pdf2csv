@@ -679,7 +679,7 @@ function handleFiles(list) {
   if(limit.totalExceeded) showBatchLimitPopup(`Limite de ${TOTAL_LIMIT} factures atteinte : seuls ${limit.accepted} fichier(s) ont été ajoutés.`);
   const firstBatch = S.invoices.length===0 && accepted.length>0;
   const duplicates=[];
-  accepted.forEach(f=>{ if(S.files.find(x=>x.name===f.name)){duplicates.push(f.name);}else{S.files.push(f);S.invoices.push({file:f,status:'pending',data:{},errors:{},confidence:null,rawNorm:{},debtorType:'entreprise'});}});
+  accepted.forEach(f=>{ if(S.files.find(x=>x.name===f.name)){duplicates.push(f.name);}else{S.files.push(f);S.invoices.push({file:f,status:'pending',data:{},errors:{},confidence:null,rawNorm:{},debtorType:null});}});
   if(duplicates.length) showDupToast(duplicates);
   if (!accepted.length) return;
   if (firstBatch) {
@@ -1028,7 +1028,7 @@ JSON uniquement.`;
     VAT_FIELDS.forEach(f=>{const raw=parsed.data[f.key];if(raw&&raw!=='null'){const n=normalizeVAT(raw);norm[f.key]=n||String(raw).replace(/[\s.\-]/g,'').toUpperCase();}else{norm[f.key]=null;}});
     norm.debtor_code=computeDebtorCode(norm);
     inv.data=norm;inv.rawNorm=rawNorm;inv.repaired=parsed.repaired||false;
-    if(norm.debtor_vat_number) inv.debtorType='entreprise';
+    inv.debtorType=norm.debtor_vat_number?'entreprise':'particulier';
     inv.confidence=confidence(norm,S.fields);inv.status='extracted';inv.errors={};
   } catch(e){inv.status='error';inv.error=e.message;inv.data={};inv.confidence=0;}
 }
@@ -1079,7 +1079,7 @@ function validateInvoice(){
     if(firstErrKey){const el=document.getElementById('fi_'+firstErrKey);if(el) el.scrollIntoView({behavior:'smooth',block:'center'});}
     return;
   }
-  inv.status='validated';renderSidebar();renderBadges(inv);updateBar();
+  inv.status='validated';renderFieldsUI(inv);renderSidebar();renderBadges(inv);updateBar();
   const allDone=S.invoices.length>0&&S.invoices.every(x=>x.status==='validated'||x.status==='skipped');
   if(allDone){
     const btn=document.getElementById('btnValidate');
@@ -1164,6 +1164,7 @@ function buildCSV(){
     let v;
     if(k==='administration_code') v=inv.data['creditor_vat_number'];
     else if(k==='debtor_company_name') v=computeDebtorCompanyName(inv.data);
+    else if(k==='debtor_is_company') v=inv.debtorType==='entreprise';
     else v=inv.data[k];
     v=v??'';
     return'"'+String(v).replace(/"/g,'""').replace(/\r?\n/g,' ')+'"';
